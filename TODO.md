@@ -2,36 +2,50 @@
 
 A comprehensive checklist for implementing the SafeChat AI Customer Support Chatbot with Integrated Safety Mechanisms.
 
+**Deployment Architecture:** Render + Neon (2 Platforms)
+
+| Component | Platform | Service Type |
+|-----------|----------|--------------|
+| Frontend (React) | Render | Static Site - Free, unlimited, global CDN |
+| Backend (Express) | Render | Web Service - Free, 750 hrs/month |
+| Database (PostgreSQL) | Neon | Serverless DB - Free, 0.5GB, never pauses |
+
 ---
 
 ## Phase 1: Infrastructure Setup
 
 ### 1.1 Database Setup (Neon)
 - [ ] Create Neon account at https://neon.tech
-- [ ] Create new project named `safechat-demo`
+- [ ] Create new project named `safechat`
 - [ ] Run `schema.sql` in Neon SQL Editor
 - [ ] Verify all tables created: `conversations`, `messages`, `knowledge_base`, `moderation_logs`
 - [ ] Copy connection string to `.env` file
 - [ ] Test database connection from local environment
 
-### 1.2 Backend Deployment Prep (Render)
+### 1.2 Render Setup (Backend + Frontend)
 - [ ] Create Render account at https://render.com
 - [ ] Connect GitHub repository
-- [ ] Create Web Service pointing to `/server` directory
+
+**Backend (Web Service):**
+- [ ] Create New → Web Service
+- [ ] Set root directory: `server`
+- [ ] Build command: `npm install`
+- [ ] Start command: `npm start`
 - [ ] Configure environment variables:
-  - [ ] `DATABASE_URL`
+  - [ ] `DATABASE_URL` (from Neon)
   - [ ] `OPENAI_API_KEY`
   - [ ] `NODE_ENV=production`
-  - [ ] `CORS_ORIGIN` (Vercel URL after frontend deploy)
+  - [ ] `CORS_ORIGIN` (frontend URL after deploy)
 
-### 1.3 Frontend Deployment Prep (Vercel)
-- [ ] Create Vercel account at https://vercel.com
-- [ ] Import GitHub repository
-- [ ] Set root directory to `/client`
+**Frontend (Static Site):**
+- [ ] Create New → Static Site
+- [ ] Set root directory: `client`
+- [ ] Build command: `npm install && npm run build`
+- [ ] Publish directory: `build`
 - [ ] Configure environment variables:
-  - [ ] `REACT_APP_API_URL` (Render URL after backend deploy)
+  - [ ] `REACT_APP_API_URL` (backend URL after deploy)
 
-### 1.4 Keep-Alive Setup (UptimeRobot)
+### 1.3 Keep-Alive Setup (UptimeRobot)
 - [ ] Create UptimeRobot account at https://uptimerobot.com
 - [ ] Add HTTP(s) monitor for `/api/health` endpoint
 - [ ] Set 5-minute monitoring interval
@@ -265,14 +279,15 @@ A comprehensive checklist for implementing the SafeChat AI Customer Support Chat
 - [ ] Run full test suite
 - [ ] Review security headers
 
-### 9.2 Deployment
-- [ ] Deploy backend to Render
-- [ ] Verify health endpoint accessible
-- [ ] Deploy frontend to Vercel
-- [ ] Update CORS_ORIGIN with Vercel URL
-- [ ] Update REACT_APP_API_URL with Render URL
-- [ ] Redeploy both with correct URLs
-- [ ] Activate UptimeRobot monitoring
+### 9.2 Deployment (Both on Render)
+- [ ] Deploy backend Web Service to Render
+- [ ] Verify health endpoint accessible at `https://safechat-api.onrender.com/api/health`
+- [ ] Deploy frontend Static Site to Render
+- [ ] Note frontend URL: `https://safechat-frontend.onrender.com`
+- [ ] Update backend `CORS_ORIGIN` with frontend URL
+- [ ] Update frontend `REACT_APP_API_URL` with backend URL
+- [ ] Trigger redeployment of both services
+- [ ] Activate UptimeRobot monitoring for backend
 
 ### 9.3 Post-Deployment Verification
 - [ ] Test full conversation flow on production
@@ -280,7 +295,7 @@ A comprehensive checklist for implementing the SafeChat AI Customer Support Chat
 - [ ] Verify RAG responses accurate
 - [ ] Verify escalation detection
 - [ ] Check response times
-- [ ] Confirm $0 infrastructure cost
+- [ ] Confirm $0 infrastructure cost (Render + Neon free tiers)
 
 ---
 
@@ -290,7 +305,7 @@ A comprehensive checklist for implementing the SafeChat AI Customer Support Chat
   - [ ] Project overview
   - [ ] Architecture diagram
   - [ ] Local development setup
-  - [ ] Deployment instructions
+  - [ ] Deployment instructions (Render)
   - [ ] Environment variables reference
 - [ ] Document API endpoints
 - [ ] Document safety mechanisms
@@ -304,7 +319,7 @@ A comprehensive checklist for implementing the SafeChat AI Customer Support Chat
 - [ ] Content moderation achieves >75% recall
 - [ ] RAG improves factual accuracy by >40% vs baseline
 - [ ] Average response time < 5 seconds
-- [ ] Deployed on Vercel + Render + Neon
+- [ ] Deployed on Render (frontend + backend) + Neon (database)
 - [ ] Escalation detection catches >70% of test cases
 - [ ] Total infrastructure cost: $0
 
@@ -334,4 +349,15 @@ npm run build
 
 ---
 
-**Last Updated:** January 2026
+## Reference URLs
+
+| Resource | URL |
+|----------|-----|
+| Render Dashboard | https://dashboard.render.com |
+| Neon Dashboard | https://console.neon.tech |
+| UptimeRobot | https://uptimerobot.com |
+| OpenAI API Keys | https://platform.openai.com/api-keys |
+
+---
+
+**Last Updated:** January 2026 (PRD v3.0)
