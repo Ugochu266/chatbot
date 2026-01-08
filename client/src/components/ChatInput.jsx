@@ -1,6 +1,6 @@
 import React, { useState } from 'react';
-import { Box, TextField, IconButton, Typography } from '@mui/material';
-import { Send as SendIcon } from '@mui/icons-material';
+import { Send } from 'lucide-react';
+import { cn } from '../lib/utils';
 
 const MAX_LENGTH = 2000;
 
@@ -26,63 +26,51 @@ function ChatInput({ onSend, disabled }) {
   const isOverLimit = charCount > MAX_LENGTH;
 
   return (
-    <Box
-      component="form"
-      onSubmit={handleSubmit}
-      sx={{
-        p: 2,
-        borderTop: 1,
-        borderColor: 'divider',
-        bgcolor: 'background.paper'
-      }}
-    >
-      <Box sx={{ display: 'flex', alignItems: 'flex-end', gap: 1 }}>
-        <TextField
-          fullWidth
-          multiline
-          maxRows={4}
-          placeholder="Type your message..."
-          value={message}
-          onChange={(e) => setMessage(e.target.value)}
-          onKeyDown={handleKeyDown}
-          disabled={disabled}
-          error={isOverLimit}
-          variant="outlined"
-          size="small"
-          sx={{
-            '& .MuiOutlinedInput-root': {
-              borderRadius: 3
-            }
-          }}
-        />
-        <IconButton
+    <form onSubmit={handleSubmit} className="p-4 border-t border-border bg-card">
+      <div className="flex items-end gap-2">
+        <div className="flex-1 relative">
+          <textarea
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            onKeyDown={handleKeyDown}
+            disabled={disabled}
+            placeholder="Type your message..."
+            rows={1}
+            className={cn(
+              "w-full resize-none rounded-xl border border-input bg-background px-4 py-3 text-sm",
+              "placeholder:text-muted-foreground focus:outline-none focus:ring-2 focus:ring-ring",
+              "disabled:cursor-not-allowed disabled:opacity-50",
+              "max-h-32 overflow-y-auto",
+              isOverLimit && "border-destructive focus:ring-destructive"
+            )}
+            style={{ minHeight: '44px' }}
+            onInput={(e) => {
+              e.target.style.height = 'auto';
+              e.target.style.height = Math.min(e.target.scrollHeight, 128) + 'px';
+            }}
+          />
+        </div>
+        <button
           type="submit"
-          color="primary"
           disabled={!message.trim() || disabled || isOverLimit}
-          sx={{
-            bgcolor: 'primary.main',
-            color: 'white',
-            '&:hover': {
-              bgcolor: 'primary.dark'
-            },
-            '&:disabled': {
-              bgcolor: 'grey.300',
-              color: 'grey.500'
-            }
-          }}
+          className={cn(
+            "h-11 w-11 rounded-xl flex items-center justify-center transition-colors shrink-0",
+            "bg-primary text-primary-foreground hover:bg-primary/90",
+            "disabled:opacity-50 disabled:cursor-not-allowed disabled:hover:bg-primary"
+          )}
         >
-          <SendIcon />
-        </IconButton>
-      </Box>
-      <Box sx={{ display: 'flex', justifyContent: 'flex-end', mt: 0.5 }}>
-        <Typography
-          variant="caption"
-          color={isOverLimit ? 'error' : 'text.secondary'}
-        >
+          <Send className="h-5 w-5" />
+        </button>
+      </div>
+      <div className="flex justify-end mt-1.5">
+        <span className={cn(
+          "text-xs",
+          isOverLimit ? "text-destructive" : "text-muted-foreground"
+        )}>
           {charCount}/{MAX_LENGTH}
-        </Typography>
-      </Box>
-    </Box>
+        </span>
+      </div>
+    </form>
   );
 }
 

@@ -8,6 +8,8 @@ import { errorHandler, notFoundHandler, logger } from './middleware/errorHandler
 import conversationRoutes from './routes/conversations.js';
 import messageRoutes from './routes/messages.js';
 import adminRoutes from './routes/admin.js';
+import rulesRoutes from './routes/rules.js';
+import settingsRoutes from './routes/settings.js';
 
 dotenv.config();
 
@@ -46,6 +48,8 @@ app.get('/api/health', (req, res) => {
 app.use('/api/conversations', conversationRoutes);
 app.use('/api/messages', messageRoutes);
 app.use('/api/admin', adminRoutes);
+app.use('/api/admin/rules', rulesRoutes);
+app.use('/api/admin/settings', settingsRoutes);
 
 // 404 handler
 app.use(notFoundHandler);

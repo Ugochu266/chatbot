@@ -1,7 +1,8 @@
 import { logger } from '../middleware/errorHandler.js';
+import ruleEngine from './ruleEngine.js';
 
-// Prompt injection patterns to detect
-const INJECTION_PATTERNS = [
+// Fallback prompt injection patterns (used when rule engine fails)
+const FALLBACK_INJECTION_PATTERNS = [
   /ignore\s+(all\s+)?(previous|prior|above)\s+(instructions?|prompts?|rules?)/i,
   /disregard\s+(all\s+)?(previous|prior|your)\s+(instructions?|prompts?|rules?)/i,
   /forget\s+(all\s+)?(previous|prior|your)\s+(instructions?|prompts?)/i,
@@ -29,9 +30,41 @@ const INJECTION_PATTERNS = [
 // HTML/Script tag pattern
 const HTML_PATTERN = /<[^>]*>/g;
 
-// Check for prompt injection attempts
-export function detectPromptInjection(text) {
-  for (const pattern of INJECTION_PATTERNS) {
+// Check for prompt injection attempts using rule engine
+export async function detectPromptInjection(text) {
+  try {
+    // Use rule engine for dynamic patterns
+    const match = await ruleEngine.matchRegexPatterns(text);
+    if (match.matched) {
+      return {
+        detected: true,
+        pattern: match.pattern,
+        action: match.action,
+        category: match.category
+      };
+    }
+
+    // Also check blocked keywords
+    const keywordMatch = await ruleEngine.matchBlockedKeywords(text);
+    if (keywordMatch.matched) {
+      return {
+        detected: true,
+        pattern: `keyword:${keywordMatch.keyword}`,
+        action: 'block'
+      };
+    }
+
+    return { detected: false };
+  } catch (err) {
+    logger.warn({ message: 'Rule engine failed, using fallback patterns', error: err.message });
+    // Fall back to hardcoded patterns
+    return detectPromptInjectionFallback(text);
+  }
+}
+
+// Synchronous fallback for when rule engine is unavailable
+function detectPromptInjectionFallback(text) {
+  for (const pattern of FALLBACK_INJECTION_PATTERNS) {
     if (pattern.test(text)) {
       return {
         detected: true,
@@ -53,7 +86,7 @@ export function normalizeWhitespace(text) {
 }
 
 // Main sanitization function
-export function sanitizeInput(text) {
+export async function sanitizeInput(text) {
   const result = {
     original: text,
     sanitized: text,
@@ -63,13 +96,15 @@ export function sanitizeInput(text) {
   };
 
   // Step 1: Check for prompt injection
-  const injectionCheck = detectPromptInjection(text);
+  const injectionCheck = await detectPromptInjection(text);
   if (injectionCheck.detected) {
     result.blocked = true;
     result.blockReason = 'PROMPT_INJECTION_DETECTED';
+    result.action = injectionCheck.action || 'block';
     logger.warn({
       message: 'Prompt injection detected',
       pattern: injectionCheck.pattern,
+      category: injectionCheck.category,
       input: text.substring(0, 100)
     });
     return result;

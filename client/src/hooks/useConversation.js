@@ -82,6 +82,15 @@ export function useConversation() {
     });
   }, []);
 
+  const replaceLastMessage = useCallback((newMessage) => {
+    setConversation(prev => {
+      if (!prev || prev.messages.length === 0) return prev;
+      const messages = [...prev.messages];
+      messages[messages.length - 1] = newMessage;
+      return { ...prev, messages };
+    });
+  }, []);
+
   const clearConversation = useCallback(() => {
     setConversation(null);
   }, []);
@@ -96,6 +105,7 @@ export function useConversation() {
     loadConversations,
     addMessage,
     updateLastMessage,
+    replaceLastMessage,
     clearConversation,
     setConversation
   };

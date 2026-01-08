@@ -1,13 +1,14 @@
 import OpenAI from 'openai';
 import { logger } from '../middleware/errorHandler.js';
 import { logModeration } from '../db/moderationLogs.js';
+import ruleEngine from './ruleEngine.js';
 
 const openai = new OpenAI({
   apiKey: process.env.OPENAI_API_KEY
 });
 
-// Categories that should trigger blocking
-const BLOCK_CATEGORIES = [
+// Fallback categories list (used when rule engine is unavailable)
+const ALL_CATEGORIES = [
   'hate',
   'hate/threatening',
   'harassment',
@@ -21,7 +22,7 @@ const BLOCK_CATEGORIES = [
   'violence/graphic'
 ];
 
-// Moderate content using OpenAI Moderation API
+// Moderate content using OpenAI Moderation API with configurable thresholds
 export async function moderateContent(text) {
   try {
     const response = await openai.moderations.create({
@@ -30,22 +31,51 @@ export async function moderateContent(text) {
 
     const result = response.results[0];
     const flaggedCategories = [];
+    const categoryActions = {};
     const scores = {};
 
-    // Check each category
-    for (const category of BLOCK_CATEGORIES) {
+    // Check each category against configurable thresholds
+    for (const category of ALL_CATEGORIES) {
       const categoryKey = category.replace('/', '_');
-      if (result.categories[category]) {
-        flaggedCategories.push(category);
+      const score = result.category_scores[category];
+      scores[categoryKey] = score;
+
+      // Get action from rule engine based on threshold
+      try {
+        const action = await ruleEngine.getModerationAction(category, score);
+        if (action.shouldAct) {
+          flaggedCategories.push(category);
+          categoryActions[category] = action.action;
+        }
+      } catch (err) {
+        // Fallback to OpenAI's built-in flagging
+        if (result.categories[category]) {
+          flaggedCategories.push(category);
+          categoryActions[category] = 'block';
+        }
       }
-      scores[categoryKey] = result.category_scores[category];
+    }
+
+    // Determine overall action
+    let shouldBlock = false;
+    let shouldEscalate = false;
+    let shouldFlag = false;
+
+    for (const category of flaggedCategories) {
+      const action = categoryActions[category] || 'block';
+      if (action === 'block') shouldBlock = true;
+      if (action === 'escalate') shouldEscalate = true;
+      if (action === 'flag') shouldFlag = true;
     }
 
     return {
-      flagged: result.flagged,
+      flagged: result.flagged || flaggedCategories.length > 0,
       categories: flaggedCategories,
+      categoryActions,
       scores,
-      shouldBlock: flaggedCategories.length > 0
+      shouldBlock,
+      shouldEscalate,
+      shouldFlag
     };
   } catch (error) {
     logger.error({
@@ -57,8 +87,11 @@ export async function moderateContent(text) {
     return {
       flagged: false,
       categories: [],
+      categoryActions: {},
       scores: {},
       shouldBlock: false,
+      shouldEscalate: false,
+      shouldFlag: false,
       error: error.message
     };
   }

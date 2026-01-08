@@ -1,48 +1,31 @@
 import React, { useEffect, useRef } from 'react';
-import { Box, Typography } from '@mui/material';
+import { MessageSquare } from 'lucide-react';
 import MessageBubble from './MessageBubble';
 
 function MessageList({ messages, streaming }) {
   const bottomRef = useRef(null);
 
-  // Auto-scroll to bottom when messages change
   useEffect(() => {
     bottomRef.current?.scrollIntoView({ behavior: 'smooth' });
   }, [messages]);
 
   if (!messages || messages.length === 0) {
     return (
-      <Box
-        sx={{
-          flex: 1,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          p: 4,
-          color: 'text.secondary'
-        }}
-      >
-        <Typography variant="h6" gutterBottom>
-          Welcome to SafeChat
-        </Typography>
-        <Typography variant="body2" textAlign="center">
+      <div className="flex-1 flex flex-col items-center justify-center p-8 text-muted-foreground">
+        <div className="bg-muted rounded-full p-4 mb-4">
+          <MessageSquare className="h-8 w-8" />
+        </div>
+        <h2 className="text-lg font-medium text-foreground mb-2">Welcome to SafeChat</h2>
+        <p className="text-sm text-center max-w-sm">
           I'm here to help you with customer support questions.
-          <br />
           Type a message below to get started.
-        </Typography>
-      </Box>
+        </p>
+      </div>
     );
   }
 
   return (
-    <Box
-      sx={{
-        flex: 1,
-        overflow: 'auto',
-        py: 2
-      }}
-    >
+    <div className="flex-1 overflow-y-auto p-4 space-y-4">
       {messages.map((message, index) => (
         <MessageBubble
           key={message.id || index}
@@ -51,7 +34,7 @@ function MessageList({ messages, streaming }) {
         />
       ))}
       <div ref={bottomRef} />
-    </Box>
+    </div>
   );
 }
 

@@ -1,23 +1,24 @@
 import { logger } from '../middleware/errorHandler.js';
 import { updateEscalation } from '../db/conversations.js';
+import ruleEngine from './ruleEngine.js';
 
-// Crisis keywords that require immediate attention
-const CRISIS_KEYWORDS = [
+// Fallback crisis keywords that require immediate attention
+const FALLBACK_CRISIS_KEYWORDS = [
   /\b(suicid|kill\s*(myself|me)|end\s*(my|it\s*all)|take\s*my\s*(own\s*)?life)\b/i,
   /\b(self[- ]?harm|cut(ting)?\s*(myself|me)|hurt(ing)?\s*(myself|me))\b/i,
   /\b(want\s*to\s*die|don'?t\s*want\s*to\s*live|better\s*off\s*dead)\b/i,
   /\b(overdose|od\s*on|pills\s*to\s*(end|die))\b/i
 ];
 
-// Legal/escalation keywords
-const LEGAL_KEYWORDS = [
+// Fallback legal/escalation keywords
+const FALLBACK_LEGAL_KEYWORDS = [
   /\b(lawyer|attorney|legal\s*(action|counsel|team))\b/i,
   /\b(lawsuit|sue|suing|litigation|court)\b/i,
   /\b(class\s*action|legal\s*proceedings)\b/i
 ];
 
-// Complaint/escalation keywords
-const COMPLAINT_KEYWORDS = [
+// Fallback complaint/escalation keywords
+const FALLBACK_COMPLAINT_KEYWORDS = [
   /\b(speak\s*(to|with)\s*(a\s*)?(manager|supervisor|human|person|agent))\b/i,
   /\b(escalate|escalation|complaint|complain)\b/i,
   /\b(report\s*(this|you)|file\s*a\s*complaint)\b/i,
@@ -25,14 +26,14 @@ const COMPLAINT_KEYWORDS = [
   /\b(bbb|better\s*business\s*bureau|consumer\s*protection)\b/i
 ];
 
-// Refund/money keywords with negative context
-const REFUND_PATTERNS = [
+// Fallback refund/money keywords with negative context
+const FALLBACK_REFUND_PATTERNS = [
   /\b(refund|money\s*back|charge\s*back|chargeback)\b/i,
   /\b(stolen|fraud|scam|rip\s*off|ripoff)\b/i
 ];
 
-// Negative sentiment indicators (simple keyword-based)
-const NEGATIVE_SENTIMENT_KEYWORDS = [
+// Fallback negative sentiment indicators (simple keyword-based)
+const FALLBACK_NEGATIVE_SENTIMENT_KEYWORDS = [
   /\b(angry|furious|livid|outraged|disgusted)\b/i,
   /\b(worst|terrible|horrible|awful|pathetic)\b/i,
   /\b(hate|despise|loathe)\b/i,
@@ -40,7 +41,86 @@ const NEGATIVE_SENTIMENT_KEYWORDS = [
   /\b(waste\s*of\s*(time|money))\b/i
 ];
 
-// Analyze text for escalation triggers
+// Priority and urgency mapping for categories
+const CATEGORY_CONFIG = {
+  crisis: { urgency: 'critical', priority: 100 },
+  legal: { urgency: 'high', priority: 80 },
+  complaint: { urgency: 'medium', priority: 60 },
+  sentiment: { urgency: 'medium', priority: 40 }
+};
+
+// Analyze text for escalation triggers using rule engine
+export async function analyzeEscalationAsync(text) {
+  const result = {
+    shouldEscalate: false,
+    reason: null,
+    type: null,
+    urgency: 'normal',
+    triggers: []
+  };
+
+  try {
+    // Use rule engine for dynamic keywords
+    const matches = await ruleEngine.matchEscalationKeywords(text);
+
+    if (matches.matched) {
+      // Group by category and find highest priority
+      const categoryMatches = {};
+      for (const match of matches.matches) {
+        if (!categoryMatches[match.category]) {
+          categoryMatches[match.category] = [];
+        }
+        categoryMatches[match.category].push(match.keyword);
+      }
+
+      // Find highest priority category
+      let highestPriority = -1;
+      let topCategory = null;
+
+      for (const category of Object.keys(categoryMatches)) {
+        const config = CATEGORY_CONFIG[category] || { urgency: 'medium', priority: 50 };
+        if (config.priority > highestPriority) {
+          highestPriority = config.priority;
+          topCategory = category;
+        }
+        result.triggers.push(`${category}_keyword`);
+      }
+
+      if (topCategory) {
+        const config = CATEGORY_CONFIG[topCategory] || { urgency: 'medium' };
+        result.shouldEscalate = true;
+        result.type = topCategory;
+        result.urgency = config.urgency;
+
+        // Set reason based on type
+        switch (topCategory) {
+          case 'crisis':
+            result.reason = 'CRISIS_DETECTED';
+            break;
+          case 'legal':
+            result.reason = 'LEGAL_CONCERN';
+            break;
+          case 'complaint':
+            result.reason = 'ESCALATION_REQUESTED';
+            break;
+          case 'sentiment':
+            result.reason = 'NEGATIVE_SENTIMENT';
+            break;
+          default:
+            result.reason = 'ESCALATION_TRIGGERED';
+        }
+      }
+    }
+
+    return result;
+  } catch (err) {
+    logger.warn({ message: 'Rule engine failed for escalation, using fallback', error: err.message });
+    // Fall back to synchronous analysis
+    return analyzeEscalation(text);
+  }
+}
+
+// Synchronous fallback analyze function (original implementation)
 export function analyzeEscalation(text) {
   const result = {
     shouldEscalate: false,
@@ -51,7 +131,7 @@ export function analyzeEscalation(text) {
   };
 
   // Check for crisis keywords (highest priority)
-  for (const pattern of CRISIS_KEYWORDS) {
+  for (const pattern of FALLBACK_CRISIS_KEYWORDS) {
     if (pattern.test(text)) {
       result.shouldEscalate = true;
       result.reason = 'CRISIS_DETECTED';
@@ -63,7 +143,7 @@ export function analyzeEscalation(text) {
   }
 
   // Check for legal keywords
-  for (const pattern of LEGAL_KEYWORDS) {
+  for (const pattern of FALLBACK_LEGAL_KEYWORDS) {
     if (pattern.test(text)) {
       result.triggers.push('legal_keyword');
       if (!result.shouldEscalate) {
@@ -76,7 +156,7 @@ export function analyzeEscalation(text) {
   }
 
   // Check for complaint/escalation requests
-  for (const pattern of COMPLAINT_KEYWORDS) {
+  for (const pattern of FALLBACK_COMPLAINT_KEYWORDS) {
     if (pattern.test(text)) {
       result.triggers.push('complaint_keyword');
       if (!result.shouldEscalate) {
@@ -89,7 +169,7 @@ export function analyzeEscalation(text) {
   }
 
   // Check for refund patterns
-  for (const pattern of REFUND_PATTERNS) {
+  for (const pattern of FALLBACK_REFUND_PATTERNS) {
     if (pattern.test(text)) {
       result.triggers.push('refund_keyword');
     }
@@ -97,7 +177,7 @@ export function analyzeEscalation(text) {
 
   // Check sentiment
   let negativeSentimentCount = 0;
-  for (const pattern of NEGATIVE_SENTIMENT_KEYWORDS) {
+  for (const pattern of FALLBACK_NEGATIVE_SENTIMENT_KEYWORDS) {
     if (pattern.test(text)) {
       negativeSentimentCount++;
       result.triggers.push('negative_sentiment');

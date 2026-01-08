@@ -1,11 +1,14 @@
-import React, { useEffect, useCallback } from 'react';
-import { Box, Alert, Snackbar } from '@mui/material';
+import React, { useEffect, useCallback, useState } from 'react';
+import { AlertCircle, X } from 'lucide-react';
 import MessageList from './MessageList';
 import ChatInput from './ChatInput';
 import { useConversation } from '../hooks/useConversation';
 import { useMessages } from '../hooks/useMessages';
 
 function ChatContainer({ conversationId, onConversationCreate }) {
+  const [showError, setShowError] = useState(false);
+  const [processing, setProcessing] = useState(false);
+
   const {
     conversation,
     loading: conversationLoading,
@@ -13,7 +16,8 @@ function ChatContainer({ conversationId, onConversationCreate }) {
     createConversation,
     loadConversation,
     addMessage,
-    updateLastMessage
+    updateLastMessage,
+    replaceLastMessage
   } = useConversation();
 
   const handleMessageUpdate = useCallback((type, data) => {
@@ -29,7 +33,6 @@ function ChatContainer({ conversationId, onConversationCreate }) {
     streaming
   } = useMessages(conversation?.id, handleMessageUpdate);
 
-  // Load or create conversation on mount
   useEffect(() => {
     const initConversation = async () => {
       if (conversationId) {
@@ -42,6 +45,16 @@ function ChatContainer({ conversationId, onConversationCreate }) {
     initConversation();
   }, [conversationId, loadConversation, createConversation, onConversationCreate]);
 
+  const error = conversationError || messageError;
+
+  useEffect(() => {
+    if (error) {
+      setShowError(true);
+      const timer = setTimeout(() => setShowError(false), 6000);
+      return () => clearTimeout(timer);
+    }
+  }, [error]);
+
   const handleSend = async (content) => {
     // Add user message immediately
     const userMessage = {
@@ -52,58 +65,73 @@ function ChatContainer({ conversationId, onConversationCreate }) {
     };
     addMessage(userMessage);
 
-    // Add placeholder for assistant response
+    // Add placeholder for assistant response (shows processing indicator)
     const assistantPlaceholder = {
       id: `temp-assistant-${Date.now()}`,
       role: 'assistant',
       content: '',
-      createdAt: new Date().toISOString()
+      createdAt: new Date().toISOString(),
+      isProcessing: true
     };
     addMessage(assistantPlaceholder);
+    setProcessing(true);
 
     try {
       const result = await sendMessage(content);
 
-      // Update with actual response
-      if (result) {
-        // The response already contains the full message
-        // We could reload the conversation or just keep the streamed content
+      // Update with actual response from API
+      if (result?.assistantMessage) {
+        replaceLastMessage({
+          id: result.assistantMessage.id,
+          role: 'assistant',
+          content: result.assistantMessage.content,
+          createdAt: result.assistantMessage.createdAt,
+          isProcessing: false
+        });
       }
-    } catch (error) {
-      // Error is handled by the hook
+    } catch (err) {
+      // Replace placeholder with error message
+      replaceLastMessage({
+        id: `error-${Date.now()}`,
+        role: 'assistant',
+        content: 'Sorry, I encountered an error processing your request. Please try again.',
+        createdAt: new Date().toISOString(),
+        isProcessing: false,
+        isError: true
+      });
+    } finally {
+      setProcessing(false);
     }
   };
 
-  const error = conversationError || messageError;
   const isLoading = conversationLoading || messageLoading;
 
   return (
-    <Box
-      sx={{
-        display: 'flex',
-        flexDirection: 'column',
-        height: '100%',
-        bgcolor: 'background.default'
-      }}
-    >
+    <div className="flex flex-col flex-1 bg-white overflow-hidden relative">
       <MessageList
         messages={conversation?.messages || []}
         streaming={streaming}
+        processing={processing}
       />
       <ChatInput
         onSend={handleSend}
-        disabled={isLoading || !conversation}
+        disabled={isLoading || !conversation || processing}
       />
-      <Snackbar
-        open={!!error}
-        autoHideDuration={6000}
-        anchorOrigin={{ vertical: 'bottom', horizontal: 'center' }}
-      >
-        <Alert severity="error" variant="filled">
-          {error}
-        </Alert>
-      </Snackbar>
-    </Box>
+
+      {/* Error Toast */}
+      {showError && error && (
+        <div className="absolute bottom-24 left-1/2 -translate-x-1/2 bg-destructive text-destructive-foreground px-4 py-3 rounded-lg shadow-lg flex items-center gap-2">
+          <AlertCircle className="h-4 w-4" />
+          <span className="text-sm">{error}</span>
+          <button
+            onClick={() => setShowError(false)}
+            className="ml-2 hover:bg-white/10 rounded p-1"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+      )}
+    </div>
   );
 }
 

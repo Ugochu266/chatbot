@@ -17,7 +17,7 @@ export async function processInput(text) {
   };
 
   // Step 1: Input Sanitization
-  const sanitizationResult = sanitizeInput(text);
+  const sanitizationResult = await sanitizeInput(text);
   if (sanitizationResult.blocked) {
     pipelineResult.passed = false;
     pipelineResult.blocked = true;

@@ -1,4 +1,4 @@
-import { api, API_URL, getSessionId } from './api';
+import { api, API_URL } from './api';
 
 // Send a message and get response
 export async function sendMessage(conversationId, content) {
