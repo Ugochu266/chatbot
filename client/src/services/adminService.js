@@ -305,6 +305,21 @@ export async function bulkImportDocuments(documents) {
   return response.data;
 }
 
+/**
+ * Bulk delete multiple documents at once.
+ *
+ * Permanently removes multiple documents from the knowledge base.
+ *
+ * @param {Array<string>} ids - Array of document IDs to delete
+ * @returns {Promise<Object>} Delete result with counts:
+ *   - deleted: Number successfully deleted
+ *   - failed: Number that failed to delete
+ */
+export async function bulkDeleteDocuments(ids) {
+  const response = await adminRequest('post', '/api/admin/knowledge-base/bulk-delete', { ids });
+  return response.data;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // SPARE PARTS CATALOG MANAGEMENT
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -429,6 +444,37 @@ export async function searchSpareParts(query, limit = 5) {
  */
 export async function bulkImportSpareParts(parts) {
   const response = await adminRequest('post', '/api/admin/spare-parts/bulk-import', { parts });
+  return response.data;
+}
+
+/**
+ * Bulk delete multiple spare parts at once.
+ *
+ * Permanently removes multiple spare parts from the catalog.
+ *
+ * @param {Array<number>} ids - Array of spare part IDs to delete
+ * @returns {Promise<Object>} Delete result with counts:
+ *   - deleted: Number successfully deleted
+ *   - failed: Number that failed to delete
+ */
+export async function bulkDeleteSpareParts(ids) {
+  const response = await adminRequest('post', '/api/admin/spare-parts/bulk-delete', { ids });
+  return response.data;
+}
+
+/**
+ * Bulk update stock status for multiple spare parts.
+ *
+ * Updates the stock status for multiple parts at once.
+ *
+ * @param {Array<number>} ids - Array of spare part IDs to update
+ * @param {string} stockStatus - New status ('In Stock', 'Low Stock', 'Out of Stock')
+ * @returns {Promise<Object>} Update result with counts:
+ *   - updated: Number successfully updated
+ *   - failed: Number that failed to update
+ */
+export async function bulkUpdateSparePartsStatus(ids, stockStatus) {
+  const response = await adminRequest('put', '/api/admin/spare-parts/bulk-status', { ids, stockStatus });
   return response.data;
 }
 

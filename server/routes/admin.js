@@ -502,6 +502,165 @@ router.post('/knowledge-base', adminCheck, async (req, res, next) => {
 });
 
 /**
+ * POST /api/admin/knowledge-base/search
+ *
+ * Search documents using the same algorithm as RAG retrieval.
+ * Useful for testing how documents will be found during conversations.
+ *
+ * Request Body:
+ * - query {string} - Search query (required)
+ * - limit {number} - Max results to return (default: 5)
+ *
+ * Response:
+ * - documents: Array of matching documents with relevance scores
+ *
+ * Errors:
+ * - 400: Missing search query
+ */
+router.post('/knowledge-base/search', adminCheck, async (req, res, next) => {
+  try {
+    const { query, limit = 5 } = req.body;
+
+    if (!query) {
+      throw new AppError('Search query is required', 400, 'VALIDATION_ERROR');
+    }
+
+    const documents = await searchDocuments(query, limit);
+
+    res.json({
+      success: true,
+      documents: documents.map(doc => ({
+        id: doc.id,
+        title: doc.title,
+        category: doc.category,
+        content: doc.content,
+        relevanceScore: doc.relevance_score
+      }))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/knowledge-base/bulk-delete
+ *
+ * Bulk delete multiple documents at once.
+ * Permanently removes documents from the knowledge base.
+ *
+ * Request Body:
+ * - ids {Array<string>} - Array of document IDs to delete
+ *
+ * Response:
+ * - deleted: Number of successfully deleted documents
+ * - failed: Number of documents that failed to delete
+ *
+ * Errors:
+ * - 400: No IDs provided or invalid format
+ */
+router.post('/knowledge-base/bulk-delete', adminCheck, async (req, res, next) => {
+  try {
+    const { ids } = req.body;
+
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      throw new AppError('Document IDs array is required', 400, 'VALIDATION_ERROR');
+    }
+
+    if (ids.length > 100) {
+      throw new AppError('Maximum 100 documents per delete operation', 400, 'VALIDATION_ERROR');
+    }
+
+    let deleted = 0;
+    let failed = 0;
+
+    for (const id of ids) {
+      try {
+        await deleteDocument(id);
+        deleted++;
+      } catch (err) {
+        failed++;
+      }
+    }
+
+    res.json({
+      success: deleted > 0,
+      deleted,
+      failed,
+      message: `Deleted ${deleted} of ${ids.length} documents`
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/knowledge-base/bulk-import
+ *
+ * Bulk import multiple documents at once.
+ * Accepts an array of documents parsed from JSON or CSV files.
+ *
+ * Request Body:
+ * - documents {Array} - Array of document objects
+ *
+ * Response:
+ * - imported: Number of successfully imported documents
+ * - failed: Number of documents that failed to import
+ * - errors: Array of error messages for failed documents
+ */
+router.post('/knowledge-base/bulk-import', adminCheck, async (req, res, next) => {
+  try {
+    const { documents } = req.body;
+
+    if (!documents || !Array.isArray(documents) || documents.length === 0) {
+      throw new AppError('Documents array is required', 400, 'VALIDATION_ERROR');
+    }
+
+    if (documents.length > 500) {
+      throw new AppError('Maximum 500 documents per import', 400, 'VALIDATION_ERROR');
+    }
+
+    let imported = 0;
+    let failed = 0;
+    const errors = [];
+
+    for (let i = 0; i < documents.length; i++) {
+      const doc = documents[i];
+
+      try {
+        if (!doc.title || !doc.category || !doc.content) {
+          throw new Error(`Missing required fields (title, category, content)`);
+        }
+
+        let keywords = doc.keywords || [];
+        if (typeof keywords === 'string') {
+          keywords = keywords.split(',').map(k => k.trim()).filter(k => k);
+        }
+
+        await addDocument(doc.title, doc.category, doc.content, keywords);
+        imported++;
+      } catch (err) {
+        failed++;
+        errors.push({
+          index: i,
+          title: doc.title || `Document ${i + 1}`,
+          error: err.message
+        });
+      }
+    }
+
+    res.status(imported > 0 ? 201 : 400).json({
+      success: imported > 0,
+      imported,
+      failed,
+      errors: errors.slice(0, 10),
+      message: `Imported ${imported} of ${documents.length} documents`
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
  * PUT /api/admin/knowledge-base/:id
  *
  * Update an existing document in the knowledge base.
@@ -584,128 +743,6 @@ router.delete('/knowledge-base/:id', adminCheck, async (req, res, next) => {
     res.json({
       success: true,
       message: 'Document deleted successfully'
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * POST /api/admin/knowledge-base/search
- *
- * Search documents using the same algorithm as RAG retrieval.
- * Useful for testing how documents will be found during conversations.
- *
- * Request Body:
- * - query {string} - Search query (required)
- * - limit {number} - Max results to return (default: 5)
- *
- * Response:
- * - documents: Array of matching documents with relevance scores
- *
- * Errors:
- * - 400: Missing search query
- */
-router.post('/knowledge-base/search', adminCheck, async (req, res, next) => {
-  try {
-    const { query, limit = 5 } = req.body;
-
-    if (!query) {
-      throw new AppError('Search query is required', 400, 'VALIDATION_ERROR');
-    }
-
-    const documents = await searchDocuments(query, limit);
-
-    res.json({
-      success: true,
-      documents: documents.map(doc => ({
-        id: doc.id,
-        title: doc.title,
-        category: doc.category,
-        content: doc.content,
-        relevanceScore: doc.relevance_score  // How well it matched the query
-      }))
-    });
-  } catch (error) {
-    next(error);
-  }
-});
-
-/**
- * POST /api/admin/knowledge-base/bulk-import
- *
- * Bulk import multiple documents at once.
- * Accepts an array of documents parsed from JSON or CSV files.
- * Useful for importing product catalogs, spare parts data, FAQ lists, etc.
- *
- * Request Body:
- * - documents {Array} - Array of document objects, each containing:
- *   - title {string} - Document title (required)
- *   - category {string} - Document category (required)
- *   - content {string} - Document content (required)
- *   - keywords {string[]} - Search keywords (optional)
- *
- * Response:
- * - imported: Number of successfully imported documents
- * - failed: Number of documents that failed to import
- * - errors: Array of error messages for failed documents
- *
- * Errors:
- * - 400: No documents provided or invalid format
- */
-router.post('/knowledge-base/bulk-import', adminCheck, async (req, res, next) => {
-  try {
-    const { documents } = req.body;
-
-    // Validate input
-    if (!documents || !Array.isArray(documents) || documents.length === 0) {
-      throw new AppError('Documents array is required', 400, 'VALIDATION_ERROR');
-    }
-
-    // Limit bulk import size to prevent abuse
-    if (documents.length > 500) {
-      throw new AppError('Maximum 500 documents per import', 400, 'VALIDATION_ERROR');
-    }
-
-    let imported = 0;
-    let failed = 0;
-    const errors = [];
-
-    // Process each document
-    for (let i = 0; i < documents.length; i++) {
-      const doc = documents[i];
-
-      try {
-        // Validate required fields
-        if (!doc.title || !doc.category || !doc.content) {
-          throw new Error(`Missing required fields (title, category, content)`);
-        }
-
-        // Normalize keywords to array
-        let keywords = doc.keywords || [];
-        if (typeof keywords === 'string') {
-          keywords = keywords.split(',').map(k => k.trim()).filter(k => k);
-        }
-
-        // Insert document
-        await addDocument(doc.title, doc.category, doc.content, keywords);
-        imported++;
-      } catch (err) {
-        failed++;
-        errors.push({
-          index: i,
-          title: doc.title || `Document ${i + 1}`,
-          error: err.message
-        });
-      }
-    }
-
-    res.status(imported > 0 ? 201 : 400).json({
-      success: imported > 0,
-      imported,
-      failed,
-      errors: errors.slice(0, 10), // Return first 10 errors only
-      message: `Imported ${imported} of ${documents.length} documents`
     });
   } catch (error) {
     next(error);
@@ -1070,6 +1107,141 @@ router.post('/spare-parts/search', adminCheck, async (req, res, next) => {
         compatibilityNotes: part.compatibility_notes,
         relevanceScore: part.relevance_score
       }))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/spare-parts/bulk-delete
+ *
+ * Bulk delete multiple spare parts at once.
+ * Permanently removes parts from the catalog.
+ * Uses POST instead of DELETE to reliably send body data.
+ *
+ * Request Body:
+ * - ids {Array<number>} - Array of spare part IDs to delete
+ *
+ * Response:
+ * - deleted: Number of successfully deleted parts
+ * - failed: Number of parts that failed to delete
+ *
+ * Errors:
+ * - 400: No IDs provided or invalid format
+ */
+router.post('/spare-parts/bulk-delete', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+
+    const { ids } = req.body;
+
+    // Validate input
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      throw new AppError('Part IDs array is required', 400, 'VALIDATION_ERROR');
+    }
+
+    // Limit bulk delete size
+    if (ids.length > 100) {
+      throw new AppError('Maximum 100 parts per delete operation', 400, 'VALIDATION_ERROR');
+    }
+
+    let deleted = 0;
+    let failed = 0;
+
+    // Delete each part
+    for (const id of ids) {
+      try {
+        await deleteSparePart(parseInt(id));
+        deleted++;
+      } catch (err) {
+        failed++;
+      }
+    }
+
+    res.json({
+      success: deleted > 0,
+      deleted,
+      failed,
+      message: `Deleted ${deleted} of ${ids.length} parts`
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/admin/spare-parts/bulk-status
+ *
+ * Bulk update stock status for multiple spare parts.
+ *
+ * Request Body:
+ * - ids {Array<number>} - Array of spare part IDs to update
+ * - stockStatus {string} - New stock status ('In Stock', 'Low Stock', 'Out of Stock')
+ *
+ * Response:
+ * - updated: Number of successfully updated parts
+ * - failed: Number of parts that failed to update
+ *
+ * Errors:
+ * - 400: No IDs provided, invalid format, or invalid status
+ */
+router.put('/spare-parts/bulk-status', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+
+    const { ids, stockStatus } = req.body;
+
+    // Validate input
+    if (!ids || !Array.isArray(ids) || ids.length === 0) {
+      throw new AppError('Part IDs array is required', 400, 'VALIDATION_ERROR');
+    }
+
+    const validStatuses = ['In Stock', 'Low Stock', 'Out of Stock'];
+    if (!stockStatus || !validStatuses.includes(stockStatus)) {
+      throw new AppError(`Stock status must be one of: ${validStatuses.join(', ')}`, 400, 'VALIDATION_ERROR');
+    }
+
+    // Limit bulk update size
+    if (ids.length > 100) {
+      throw new AppError('Maximum 100 parts per update operation', 400, 'VALIDATION_ERROR');
+    }
+
+    let updated = 0;
+    let failed = 0;
+
+    // Update each part's status
+    for (const id of ids) {
+      try {
+        const part = await getSparePartById(parseInt(id));
+        if (part) {
+          await updateSparePart(parseInt(id), {
+            vehicle_make: part.vehicle_make,
+            vehicle_model: part.vehicle_model,
+            year_from: part.year_from,
+            year_to: part.year_to,
+            part_number: part.part_number,
+            part_category: part.part_category,
+            part_description: part.part_description,
+            price_gbp: part.price_gbp,
+            price_usd: part.price_usd,
+            stock_status: stockStatus,
+            compatibility_notes: part.compatibility_notes
+          });
+          updated++;
+        } else {
+          failed++;
+        }
+      } catch (err) {
+        failed++;
+      }
+    }
+
+    res.json({
+      success: updated > 0,
+      updated,
+      failed,
+      message: `Updated ${updated} of ${ids.length} parts to "${stockStatus}"`
     });
   } catch (error) {
     next(error);

@@ -76,8 +76,21 @@ import {
   updateSparePart,
   deleteSparePart,
   searchSpareParts,
-  bulkImportSpareParts
+  bulkImportSpareParts,
+  bulkDeleteSpareParts,
+  bulkUpdateSparePartsStatus
 } from '../../services/adminService';
+import { Checkbox } from '../../components/ui/checkbox';
+import {
+  AlertDialog,
+  AlertDialogAction,
+  AlertDialogCancel,
+  AlertDialogContent,
+  AlertDialogDescription,
+  AlertDialogFooter,
+  AlertDialogHeader,
+  AlertDialogTitle,
+} from '../../components/ui/alert-dialog';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHUNKED UPLOAD UTILITIES
@@ -249,6 +262,8 @@ function ImportDialog({ open, onClose, onImport }) {
   const [progressText, setProgressText] = useState('');
   const fileInputRef = useRef(null);
   const parsedPartsRef = useRef([]);
+  // Track current file to prevent race condition when user selects multiple files quickly
+  const currentFileRef = useRef(null);
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -262,8 +277,15 @@ function ImportDialog({ open, onClose, onImport }) {
     parsedPartsRef.current = [];
 
     if (selectedFile) {
+      // Track this file as the current one being processed
+      const fileId = `${selectedFile.name}-${selectedFile.lastModified}`;
+      currentFileRef.current = fileId;
+
       const reader = new FileReader();
       reader.onload = (event) => {
+        // Only process if this is still the current file (prevents race condition)
+        if (currentFileRef.current !== fileId) return;
+
         try {
           const parts = parseCSV(event.target.result);
           parsedPartsRef.current = parts;
@@ -735,6 +757,17 @@ export default function SparePartsPage() {
   const [editingPart, setEditingPart] = useState(null);
   const [deletingPart, setDeletingPart] = useState(null);
 
+  // Bulk operations state
+  const [selectedIds, setSelectedIds] = useState(new Set());
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkDeleting, setBulkDeleting] = useState(false);
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState({ deleted: 0, total: 0 });
+  const [bulkStatusOpen, setBulkStatusOpen] = useState(false);
+  const [bulkStatusValue, setBulkStatusValue] = useState('');
+  const [bulkUpdating, setBulkUpdating] = useState(false);
+  const [bulkUpdateProgress, setBulkUpdateProgress] = useState({ updated: 0, total: 0 });
+  const [singleDeleting, setSingleDeleting] = useState(false);
+
   // Load parts
   const loadParts = useCallback(async () => {
     try {
@@ -780,12 +813,119 @@ export default function SparePartsPage() {
   const handleDelete = async () => {
     if (!deletingPart) return;
 
+    setSingleDeleting(true);
     try {
       await deleteSparePart(deletingPart.id);
       setDeletingPart(null);
       loadParts();
     } catch (err) {
       console.error('Delete failed:', err);
+    } finally {
+      setSingleDeleting(false);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BULK SELECTION HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Toggle selection of a single part.
+   */
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  /**
+   * Toggle select all visible parts.
+   */
+  const toggleSelectAll = () => {
+    if (selectedIds.size === displayParts.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(displayParts.map(part => part.id)));
+    }
+  };
+
+  /**
+   * Clear all selections.
+   */
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  /**
+   * Handle bulk delete of selected parts.
+   * Processes in chunks of 100 to handle large selections.
+   */
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    setBulkDeleteOpen(false);
+
+    const ids = Array.from(selectedIds);
+    const chunkSize = 100;
+    let totalDeleted = 0;
+
+    setBulkDeleteProgress({ deleted: 0, total: ids.length });
+
+    try {
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const result = await bulkDeleteSpareParts(chunk);
+        totalDeleted += result.deleted || 0;
+        setBulkDeleteProgress({ deleted: totalDeleted, total: ids.length });
+      }
+
+      setSelectedIds(new Set());
+      loadParts();
+    } catch (err) {
+      console.error('Failed to bulk delete parts:', err);
+    } finally {
+      setBulkDeleting(false);
+      setBulkDeleteProgress({ deleted: 0, total: 0 });
+    }
+  };
+
+  /**
+   * Handle bulk status update of selected parts.
+   * Processes in chunks of 100 to handle large selections.
+   */
+  const handleBulkStatusUpdate = async () => {
+    if (selectedIds.size === 0 || !bulkStatusValue) return;
+    setBulkUpdating(true);
+    setBulkStatusOpen(false);
+
+    const ids = Array.from(selectedIds);
+    const chunkSize = 100;
+    let totalUpdated = 0;
+
+    setBulkUpdateProgress({ updated: 0, total: ids.length });
+
+    try {
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const result = await bulkUpdateSparePartsStatus(chunk, bulkStatusValue);
+        totalUpdated += result.updated || 0;
+        setBulkUpdateProgress({ updated: totalUpdated, total: ids.length });
+      }
+
+      setSelectedIds(new Set());
+      setBulkStatusValue('');
+      loadParts();
+    } catch (err) {
+      console.error('Failed to bulk update status:', err);
+    } finally {
+      setBulkUpdating(false);
+      setBulkUpdateProgress({ updated: 0, total: 0 });
     }
   };
 
@@ -805,10 +945,17 @@ export default function SparePartsPage() {
   const totalPages = Math.ceil(displayParts.length / limit);
   const paginatedParts = displayParts.slice((page - 1) * limit, page * limit);
 
-  // Reset to page 1 when filters change
+  // Reset to page 1 when filters or search results change
   useEffect(() => {
     setPage(1);
   }, [selectedCategory, selectedMake, searchResults]);
+
+  // Clear search results when filters change to prevent stale search results
+  // from overriding the filtered parts list
+  useEffect(() => {
+    setSearchResults(null);
+    setSearchQuery('');
+  }, [selectedCategory, selectedMake]);
 
   if (loading && parts.length === 0) {
     return (
@@ -905,6 +1052,53 @@ export default function SparePartsPage() {
         </CardContent>
       </Card>
 
+      {/* Bulk Actions Toolbar */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-4 p-3 bg-muted rounded-lg border">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={selectedIds.size === displayParts.length && displayParts.length > 0}
+              onCheckedChange={toggleSelectAll}
+            />
+            <span className="text-sm font-medium">
+              {selectedIds.size} selected
+            </span>
+          </div>
+          <div className="flex-1" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={clearSelection}
+          >
+            Clear Selection
+          </Button>
+          <Select
+            value={bulkStatusValue}
+            onValueChange={(val) => {
+              setBulkStatusValue(val);
+              setBulkStatusOpen(true);
+            }}
+          >
+            <SelectTrigger className="w-[180px]">
+              <SelectValue placeholder="Change Status..." />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="In Stock">In Stock</SelectItem>
+              <SelectItem value="Low Stock">Low Stock</SelectItem>
+              <SelectItem value="Out of Stock">Out of Stock</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setBulkDeleteOpen(true)}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete Selected
+          </Button>
+        </div>
+      )}
+
       {/* Parts Table */}
       <Card>
         <CardHeader>
@@ -931,6 +1125,12 @@ export default function SparePartsPage() {
               <Table>
                 <TableHeader>
                   <TableRow>
+                    <TableHead className="w-[50px]">
+                      <Checkbox
+                        checked={selectedIds.size === displayParts.length && displayParts.length > 0}
+                        onCheckedChange={toggleSelectAll}
+                      />
+                    </TableHead>
                     <TableHead>Part Number</TableHead>
                     <TableHead>Description</TableHead>
                     <TableHead>Vehicle</TableHead>
@@ -943,7 +1143,13 @@ export default function SparePartsPage() {
                 </TableHeader>
                 <TableBody>
                   {paginatedParts.map((part) => (
-                    <TableRow key={part.id}>
+                    <TableRow key={part.id} className={selectedIds.has(part.id) ? 'bg-primary/5' : ''}>
+                      <TableCell>
+                        <Checkbox
+                          checked={selectedIds.has(part.id)}
+                          onCheckedChange={() => toggleSelect(part.id)}
+                        />
+                      </TableCell>
                       <TableCell className="font-mono text-xs">{part.partNumber}</TableCell>
                       <TableCell className="max-w-[200px] truncate">{part.partDescription}</TableCell>
                       <TableCell>
@@ -1052,6 +1258,92 @@ export default function SparePartsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      {/* Bulk Delete Confirmation */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} Parts</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedIds.size} selected part{selectedIds.size !== 1 ? 's' : ''}?
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={bulkDeleting}
+            >
+              Delete {selectedIds.size} Part{selectedIds.size !== 1 ? 's' : ''}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Bulk Status Update Confirmation */}
+      <AlertDialog open={bulkStatusOpen} onOpenChange={(open) => {
+        setBulkStatusOpen(open);
+        if (!open) setBulkStatusValue('');
+      }}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Update Stock Status</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to change the stock status of {selectedIds.size} selected part{selectedIds.size !== 1 ? 's' : ''} to "{bulkStatusValue}"?
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkUpdating}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkStatusUpdate}
+              disabled={bulkUpdating}
+            >
+              Update {selectedIds.size} Part{selectedIds.size !== 1 ? 's' : ''}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* Loading Overlay - Shows during any delete or update operation */}
+      {(singleDeleting || bulkDeleting || bulkUpdating) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 p-8 rounded-lg bg-card border shadow-lg min-w-[300px]">
+            <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            <div className="text-center w-full">
+              <p className="text-lg font-medium">
+                {bulkUpdating
+                  ? 'Updating Stock Status'
+                  : bulkDeleting
+                    ? 'Deleting Parts'
+                    : 'Deleting Part'
+                }
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {bulkUpdating
+                  ? `Updated ${bulkUpdateProgress.updated} of ${bulkUpdateProgress.total} parts...`
+                  : bulkDeleting
+                    ? `Deleted ${bulkDeleteProgress.deleted} of ${bulkDeleteProgress.total} parts...`
+                    : `Deleting "${deletingPart?.partDescription}"...`
+                }
+              </p>
+              {bulkDeleting && bulkDeleteProgress.total > 0 && (
+                <Progress
+                  value={(bulkDeleteProgress.deleted / bulkDeleteProgress.total) * 100}
+                  className="mt-3"
+                />
+              )}
+              {bulkUpdating && bulkUpdateProgress.total > 0 && (
+                <Progress
+                  value={(bulkUpdateProgress.updated / bulkUpdateProgress.total) * 100}
+                  className="mt-3"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }

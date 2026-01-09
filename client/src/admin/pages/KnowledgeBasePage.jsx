@@ -81,8 +81,10 @@ import {
   createDocument,
   updateDocument,
   deleteDocument,
-  bulkImportDocuments
+  bulkImportDocuments,
+  bulkDeleteDocuments
 } from '../../services/adminService';
+import { Checkbox } from '../../components/ui/checkbox';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHUNKED UPLOAD UTILITIES
@@ -562,6 +564,8 @@ function ImportDialog({ open, onClose, onImportComplete }) {
   const [progress, setProgress] = useState(0);         // Upload progress (0-100)
   const [progressText, setProgressText] = useState(''); // Progress status text
   const fileInputRef = useRef(null);
+  // Track current file to prevent race condition when user selects multiple files quickly
+  const currentFileRef = useRef(null);
 
   // Reset state when dialog closes
   useEffect(() => {
@@ -592,8 +596,15 @@ function ImportDialog({ open, onClose, onImportComplete }) {
     setParsedData([]);
     setImportResult(null);
 
+    // Track this file as the current one being processed
+    const fileId = `${file.name}-${file.lastModified}`;
+    currentFileRef.current = fileId;
+
     const reader = new FileReader();
     reader.onload = (event) => {
+      // Only process if this is still the current file (prevents race condition)
+      if (currentFileRef.current !== fileId) return;
+
       try {
         const text = event.target.result;
         let documents;
@@ -628,6 +639,8 @@ function ImportDialog({ open, onClose, onImportComplete }) {
     };
 
     reader.onerror = () => {
+      // Only process error if this is still the current file
+      if (currentFileRef.current !== fileId) return;
       setParseError('Failed to read file');
     };
 
@@ -922,6 +935,10 @@ export default function KnowledgeBasePage() {
   const [deleting, setDeleting] = useState(false);       // Delete in progress
   const [page, setPage] = useState(1);                   // Current page number
   const [importDialogOpen, setImportDialogOpen] = useState(false); // Import dialog state
+  const [selectedIds, setSelectedIds] = useState(new Set()); // Selected document IDs
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false); // Bulk delete confirmation
+  const [bulkDeleting, setBulkDeleting] = useState(false); // Bulk delete in progress
+  const [bulkDeleteProgress, setBulkDeleteProgress] = useState({ deleted: 0, total: 0 }); // Progress tracking
   const limit = 10;  // Items per page
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -984,6 +1001,77 @@ export default function KnowledgeBasePage() {
       console.error('Failed to delete document:', err);
     } finally {
       setDeleting(false);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // BULK SELECTION HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Toggle selection of a single document.
+   */
+  const toggleSelect = (id) => {
+    setSelectedIds(prev => {
+      const newSet = new Set(prev);
+      if (newSet.has(id)) {
+        newSet.delete(id);
+      } else {
+        newSet.add(id);
+      }
+      return newSet;
+    });
+  };
+
+  /**
+   * Toggle select all visible documents.
+   */
+  const toggleSelectAll = () => {
+    if (selectedIds.size === filteredDocs.length) {
+      setSelectedIds(new Set());
+    } else {
+      setSelectedIds(new Set(filteredDocs.map(doc => doc.id)));
+    }
+  };
+
+  /**
+   * Clear all selections.
+   */
+  const clearSelection = () => {
+    setSelectedIds(new Set());
+  };
+
+  /**
+   * Handle bulk delete of selected documents.
+   * Processes in chunks of 100 to handle large selections.
+   */
+  const handleBulkDelete = async () => {
+    if (selectedIds.size === 0) return;
+    setBulkDeleting(true);
+    setBulkDeleteOpen(false);
+
+    const ids = Array.from(selectedIds);
+    const chunkSize = 100;
+    let totalDeleted = 0;
+
+    setBulkDeleteProgress({ deleted: 0, total: ids.length });
+
+    try {
+      // Process in chunks
+      for (let i = 0; i < ids.length; i += chunkSize) {
+        const chunk = ids.slice(i, i + chunkSize);
+        const result = await bulkDeleteDocuments(chunk);
+        totalDeleted += result.deleted || 0;
+        setBulkDeleteProgress({ deleted: totalDeleted, total: ids.length });
+      }
+
+      setSelectedIds(new Set());
+      loadDocuments();
+    } catch (err) {
+      console.error('Failed to bulk delete documents:', err);
+    } finally {
+      setBulkDeleting(false);
+      setBulkDeleteProgress({ deleted: 0, total: 0 });
     }
   };
 
@@ -1092,6 +1180,40 @@ export default function KnowledgeBasePage() {
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════
+          BULK ACTIONS TOOLBAR
+          Shows when items are selected
+          ═══════════════════════════════════════════════════════════════════════ */}
+      {selectedIds.size > 0 && (
+        <div className="flex items-center gap-4 p-3 bg-muted rounded-lg border">
+          <div className="flex items-center gap-2">
+            <Checkbox
+              checked={selectedIds.size === filteredDocs.length && filteredDocs.length > 0}
+              onCheckedChange={toggleSelectAll}
+            />
+            <span className="text-sm font-medium">
+              {selectedIds.size} selected
+            </span>
+          </div>
+          <div className="flex-1" />
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={clearSelection}
+          >
+            Clear Selection
+          </Button>
+          <Button
+            variant="destructive"
+            size="sm"
+            onClick={() => setBulkDeleteOpen(true)}
+          >
+            <Trash2 className="h-4 w-4 mr-2" />
+            Delete Selected
+          </Button>
+        </div>
+      )}
+
+      {/* ═══════════════════════════════════════════════════════════════════════
           DOCUMENT LIST
           ═══════════════════════════════════════════════════════════════════════ */}
       {documents.length === 0 ? (
@@ -1138,8 +1260,14 @@ export default function KnowledgeBasePage() {
                   {docs.map((doc) => (
                     <div
                       key={doc.id}
-                      className="flex items-start justify-between p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
+                      className={`flex items-start gap-3 p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors ${selectedIds.has(doc.id) ? 'ring-2 ring-primary bg-primary/5' : ''}`}
                     >
+                      {/* Selection checkbox */}
+                      <Checkbox
+                        checked={selectedIds.has(doc.id)}
+                        onCheckedChange={() => toggleSelect(doc.id)}
+                        className="mt-1"
+                      />
                       {/* Document info */}
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium">{doc.title}</h4>
@@ -1271,6 +1399,59 @@ export default function KnowledgeBasePage() {
         onClose={() => setImportDialogOpen(false)}
         onImportComplete={loadDocuments}
       />
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          BULK DELETE CONFIRMATION DIALOG
+          ═══════════════════════════════════════════════════════════════════════ */}
+      <AlertDialog open={bulkDeleteOpen} onOpenChange={setBulkDeleteOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>Delete {selectedIds.size} Documents</AlertDialogTitle>
+            <AlertDialogDescription>
+              Are you sure you want to delete {selectedIds.size} selected document{selectedIds.size !== 1 ? 's' : ''}?
+              This action cannot be undone.
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel disabled={bulkDeleting}>Cancel</AlertDialogCancel>
+            <AlertDialogAction
+              onClick={handleBulkDelete}
+              className="bg-destructive text-destructive-foreground hover:bg-destructive/90"
+              disabled={bulkDeleting}
+            >
+              Delete {selectedIds.size} Document{selectedIds.size !== 1 ? 's' : ''}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          LOADING OVERLAY - Shows during any delete operation
+          ═══════════════════════════════════════════════════════════════════════ */}
+      {(deleting || bulkDeleting) && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-background/80 backdrop-blur-sm">
+          <div className="flex flex-col items-center gap-4 p-8 rounded-lg bg-card border shadow-lg min-w-[300px]">
+            <Loader2 className="h-12 w-12 animate-spin text-primary" />
+            <div className="text-center w-full">
+              <p className="text-lg font-medium">
+                {bulkDeleting ? 'Deleting Documents' : 'Deleting Document'}
+              </p>
+              <p className="text-sm text-muted-foreground">
+                {bulkDeleting
+                  ? `Deleted ${bulkDeleteProgress.deleted} of ${bulkDeleteProgress.total} documents...`
+                  : `Deleting "${deleteDoc?.title}"...`
+                }
+              </p>
+              {bulkDeleting && bulkDeleteProgress.total > 0 && (
+                <Progress
+                  value={(bulkDeleteProgress.deleted / bulkDeleteProgress.total) * 100}
+                  className="mt-3"
+                />
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
