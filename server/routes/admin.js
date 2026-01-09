@@ -615,4 +615,85 @@ router.post('/knowledge-base/search', adminCheck, async (req, res, next) => {
   }
 });
 
+/**
+ * POST /api/admin/knowledge-base/bulk-import
+ *
+ * Bulk import multiple documents at once.
+ * Accepts an array of documents parsed from JSON or CSV files.
+ * Useful for importing product catalogs, spare parts data, FAQ lists, etc.
+ *
+ * Request Body:
+ * - documents {Array} - Array of document objects, each containing:
+ *   - title {string} - Document title (required)
+ *   - category {string} - Document category (required)
+ *   - content {string} - Document content (required)
+ *   - keywords {string[]} - Search keywords (optional)
+ *
+ * Response:
+ * - imported: Number of successfully imported documents
+ * - failed: Number of documents that failed to import
+ * - errors: Array of error messages for failed documents
+ *
+ * Errors:
+ * - 400: No documents provided or invalid format
+ */
+router.post('/knowledge-base/bulk-import', adminCheck, async (req, res, next) => {
+  try {
+    const { documents } = req.body;
+
+    // Validate input
+    if (!documents || !Array.isArray(documents) || documents.length === 0) {
+      throw new AppError('Documents array is required', 400, 'VALIDATION_ERROR');
+    }
+
+    // Limit bulk import size to prevent abuse
+    if (documents.length > 500) {
+      throw new AppError('Maximum 500 documents per import', 400, 'VALIDATION_ERROR');
+    }
+
+    let imported = 0;
+    let failed = 0;
+    const errors = [];
+
+    // Process each document
+    for (let i = 0; i < documents.length; i++) {
+      const doc = documents[i];
+
+      try {
+        // Validate required fields
+        if (!doc.title || !doc.category || !doc.content) {
+          throw new Error(`Missing required fields (title, category, content)`);
+        }
+
+        // Normalize keywords to array
+        let keywords = doc.keywords || [];
+        if (typeof keywords === 'string') {
+          keywords = keywords.split(',').map(k => k.trim()).filter(k => k);
+        }
+
+        // Insert document
+        await addDocument(doc.title, doc.category, doc.content, keywords);
+        imported++;
+      } catch (err) {
+        failed++;
+        errors.push({
+          index: i,
+          title: doc.title || `Document ${i + 1}`,
+          error: err.message
+        });
+      }
+    }
+
+    res.status(imported > 0 ? 201 : 400).json({
+      success: imported > 0,
+      imported,
+      failed,
+      errors: errors.slice(0, 10), // Return first 10 errors only
+      message: `Imported ${imported} of ${documents.length} documents`
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
 export default router;

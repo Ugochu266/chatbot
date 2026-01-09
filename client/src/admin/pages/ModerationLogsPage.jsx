@@ -211,6 +211,7 @@ export default function ModerationLogsPage() {
   const [logs, setLogs] = useState([]);             // List of moderation logs
   const [loading, setLoading] = useState(true);     // Initial loading state
   const [page, setPage] = useState(1);              // Current page number
+  const [total, setTotal] = useState(0);            // Total count for pagination
   const [selectedLog, setSelectedLog] = useState(null);  // Log for detail modal
   const [dialogOpen, setDialogOpen] = useState(false);   // Modal open state
   const limit = 10;  // Items per page
@@ -228,6 +229,8 @@ export default function ModerationLogsPage() {
       setLoading(true);
       const response = await getModerationLogs(page, limit);
       setLogs(response.logs || []);
+      // Extract total count for proper pagination
+      setTotal(response.pagination?.total || response.total || 0);
     } catch (err) {
       console.error('Failed to load moderation logs:', err);
     } finally {
@@ -406,12 +409,14 @@ export default function ModerationLogsPage() {
                 >
                   <ChevronLeft className="h-4 w-4" />
                 </Button>
-                <span className="text-sm text-muted-foreground">Page {page}</span>
+                <span className="text-sm text-muted-foreground">
+                  Page {page} {total > 0 && `of ${Math.ceil(total / limit)}`}
+                </span>
                 <Button
                   variant="outline"
                   size="sm"
                   onClick={() => setPage(p => p + 1)}
-                  disabled={logs.length < limit}
+                  disabled={page >= Math.ceil(total / limit) || total === 0}
                 >
                   <ChevronRight className="h-4 w-4" />
                 </Button>

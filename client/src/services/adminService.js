@@ -282,6 +282,29 @@ export async function searchDocuments(query, limit = 5) {
   return response.data;
 }
 
+/**
+ * Bulk import multiple documents at once.
+ *
+ * Accepts an array of document objects, typically parsed from JSON or CSV files.
+ * Useful for importing product catalogs, spare parts data, FAQ lists, etc.
+ *
+ * Expected document format:
+ * - title: Document title (required)
+ * - category: Document category (required)
+ * - content: Full document text (required)
+ * - keywords: Array or comma-separated string of keywords (optional)
+ *
+ * @param {Array} documents - Array of document objects to import
+ * @returns {Promise<Object>} Import result with counts:
+ *   - imported: Number successfully imported
+ *   - failed: Number that failed
+ *   - errors: Array of error details
+ */
+export async function bulkImportDocuments(documents) {
+  const response = await adminRequest('post', '/api/admin/knowledge-base/bulk-import', { documents });
+  return response.data;
+}
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // AUTHENTICATION VERIFICATION
 // ═══════════════════════════════════════════════════════════════════════════════

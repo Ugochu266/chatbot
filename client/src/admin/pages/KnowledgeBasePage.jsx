@@ -27,7 +27,7 @@
  * @module admin/pages/KnowledgeBasePage
  */
 
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useRef } from 'react';
 import {
   BookOpen,
   Plus,
@@ -37,7 +37,12 @@ import {
   Search,
   FolderOpen,
   ChevronLeft,
-  ChevronRight
+  ChevronRight,
+  Upload,
+  FileJson,
+  FileSpreadsheet,
+  AlertCircle,
+  CheckCircle2
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -74,7 +79,8 @@ import {
   getKnowledgeBase,
   createDocument,
   updateDocument,
-  deleteDocument
+  deleteDocument,
+  bulkImportDocuments
 } from '../../services/adminService';
 
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -271,6 +277,501 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// FILE IMPORT DIALOG
+// Handles JSON/CSV file upload and bulk import
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Parse a single CSV line handling quoted values with commas inside.
+ *
+ * @param {string} line - CSV line to parse
+ * @returns {string[]} Array of column values
+ */
+function parseCSVLine(line) {
+  const values = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (const char of line) {
+    if (char === '"') {
+      inQuotes = !inQuotes;
+    } else if (char === ',' && !inQuotes) {
+      values.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  values.push(current.trim()); // Last value
+  return values;
+}
+
+/**
+ * Parse CSV text into array of document objects.
+ *
+ * Supports two formats:
+ * 1. Standard: title, category, content, keywords columns
+ * 2. Spare Parts: vehicle_make, vehicle_model, part_number, part_category,
+ *    part_description, price_*, stock_status, compatibility_notes
+ *
+ * Auto-detects format based on column headers and transforms accordingly.
+ *
+ * @param {string} csvText - Raw CSV text content
+ * @returns {Array} Array of parsed document objects
+ */
+function parseCSV(csvText) {
+  const lines = csvText.split('\n').filter(line => line.trim());
+  if (lines.length < 2) return []; // Need header + at least one row
+
+  // Parse header row
+  const headers = lines[0].split(',').map(h => h.trim().toLowerCase().replace(/['"]/g, ''));
+
+  // Detect format: check for spare parts specific columns
+  const isSparePartsFormat = headers.includes('part_number') ||
+                             headers.includes('vehicle_make') ||
+                             headers.includes('part_description');
+
+  if (isSparePartsFormat) {
+    return parseSparePartsCSV(headers, lines);
+  }
+
+  // Standard format: title, category, content, keywords
+  const titleIdx = headers.indexOf('title');
+  const categoryIdx = headers.indexOf('category');
+  const contentIdx = headers.indexOf('content');
+  const keywordsIdx = headers.indexOf('keywords');
+
+  // Validate required columns exist
+  if (titleIdx === -1 || categoryIdx === -1 || contentIdx === -1) {
+    throw new Error('CSV must have title, category, and content columns (or use spare parts format with part_number, vehicle_make, etc.)');
+  }
+
+  // Parse data rows
+  const documents = [];
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+
+    if (values.length >= 3) {
+      documents.push({
+        title: values[titleIdx] || '',
+        category: values[categoryIdx] || '',
+        content: values[contentIdx] || '',
+        keywords: keywordsIdx !== -1 && values[keywordsIdx]
+          ? values[keywordsIdx].split(';').map(k => k.trim()).filter(k => k)
+          : []
+      });
+    }
+  }
+
+  return documents;
+}
+
+/**
+ * Parse spare parts CSV format into knowledge base documents.
+ * Transforms vehicle/part data into searchable content documents.
+ *
+ * @param {string[]} headers - Column headers
+ * @param {string[]} lines - All CSV lines including header
+ * @returns {Array} Array of document objects
+ */
+function parseSparePartsCSV(headers, lines) {
+  // Map column indices
+  const colIdx = {};
+  headers.forEach((h, i) => { colIdx[h] = i; });
+
+  const documents = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+    if (values.length < 3) continue;
+
+    // Extract values with fallbacks
+    const get = (col) => (colIdx[col] !== undefined ? values[colIdx[col]] : '') || '';
+
+    const vehicleMake = get('vehicle_make');
+    const vehicleModel = get('vehicle_model');
+    const yearFrom = get('year_from');
+    const yearTo = get('year_to');
+    const partNumber = get('part_number');
+    const partCategory = get('part_category');
+    const partDescription = get('part_description');
+    const priceGbp = get('price_gbp');
+    const priceUsd = get('price_usd');
+    const stockStatus = get('stock_status');
+    const compatNotes = get('compatibility_notes');
+
+    // Build document title
+    const title = partDescription
+      ? `${partDescription} (${partNumber})`
+      : partNumber || `Part ${i}`;
+
+    // Category: use part category or vehicle make
+    const category = partCategory || vehicleMake || 'Spare Parts';
+
+    // Build rich content for RAG retrieval
+    const contentParts = [];
+    if (partDescription) contentParts.push(partDescription);
+    if (partNumber) contentParts.push(`Part Number: ${partNumber}`);
+    if (vehicleMake && vehicleModel) {
+      const years = yearFrom && yearTo ? ` (${yearFrom}-${yearTo})` : '';
+      contentParts.push(`Fits: ${vehicleMake} ${vehicleModel}${years}`);
+    }
+    if (priceGbp || priceUsd) {
+      const prices = [];
+      if (priceGbp) prices.push(`£${priceGbp}`);
+      if (priceUsd) prices.push(`$${priceUsd}`);
+      contentParts.push(`Price: ${prices.join(' / ')}`);
+    }
+    if (stockStatus) contentParts.push(`Availability: ${stockStatus}`);
+    if (compatNotes) contentParts.push(`Notes: ${compatNotes}`);
+
+    const content = contentParts.join('. ');
+
+    // Build keywords for search
+    const keywords = [
+      vehicleMake,
+      vehicleModel,
+      partNumber,
+      partCategory,
+      stockStatus
+    ].filter(k => k && k.trim());
+
+    // Add part description words as keywords
+    if (partDescription) {
+      const descWords = partDescription.split(/[\s-]+/).filter(w => w.length > 3);
+      keywords.push(...descWords.slice(0, 5));
+    }
+
+    documents.push({
+      title,
+      category,
+      content,
+      keywords: [...new Set(keywords)] // Remove duplicates
+    });
+  }
+
+  return documents;
+}
+
+/**
+ * Modal dialog for importing documents from JSON or CSV files.
+ *
+ * Supports:
+ * - JSON: Array of objects with title, category, content, keywords
+ * - CSV: Columns for title, category, content, keywords (semicolon-separated)
+ *
+ * @param {Object} props - Component props
+ * @param {boolean} props.open - Whether dialog is open
+ * @param {Function} props.onClose - Close handler
+ * @param {Function} props.onImportComplete - Called after successful import
+ * @returns {React.ReactElement} Import dialog
+ */
+function ImportDialog({ open, onClose, onImportComplete }) {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STATE
+  // ─────────────────────────────────────────────────────────────────────────────
+  const [parsedData, setParsedData] = useState([]);    // Parsed documents
+  const [parseError, setParseError] = useState('');    // Parsing error message
+  const [importing, setImporting] = useState(false);   // Import in progress
+  const [importResult, setImportResult] = useState(null); // Import result
+  const [fileName, setFileName] = useState('');        // Selected file name
+  const fileInputRef = useRef(null);
+
+  // Reset state when dialog closes
+  useEffect(() => {
+    if (!open) {
+      setParsedData([]);
+      setParseError('');
+      setImportResult(null);
+      setFileName('');
+    }
+  }, [open]);
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FILE HANDLING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Handle file selection and parsing.
+   * Detects file type from extension and parses accordingly.
+   */
+  const handleFileSelect = (e) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setFileName(file.name);
+    setParseError('');
+    setParsedData([]);
+    setImportResult(null);
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const text = event.target.result;
+        let documents;
+
+        if (file.name.endsWith('.json')) {
+          // Parse JSON file
+          const json = JSON.parse(text);
+          documents = Array.isArray(json) ? json : [json];
+        } else if (file.name.endsWith('.csv')) {
+          // Parse CSV file
+          documents = parseCSV(text);
+        } else {
+          throw new Error('Unsupported file type. Use .json or .csv files.');
+        }
+
+        // Validate parsed documents
+        if (documents.length === 0) {
+          throw new Error('No valid documents found in file');
+        }
+
+        // Check for required fields
+        const invalid = documents.filter(d => !d.title || !d.category || !d.content);
+        if (invalid.length > 0) {
+          throw new Error(`${invalid.length} document(s) missing required fields (title, category, content)`);
+        }
+
+        setParsedData(documents);
+      } catch (err) {
+        setParseError(err.message);
+        setParsedData([]);
+      }
+    };
+
+    reader.onerror = () => {
+      setParseError('Failed to read file');
+    };
+
+    reader.readAsText(file);
+  };
+
+  /**
+   * Import parsed documents to the knowledge base.
+   */
+  const handleImport = async () => {
+    if (parsedData.length === 0) return;
+
+    setImporting(true);
+    try {
+      const result = await bulkImportDocuments(parsedData);
+      setImportResult(result);
+
+      // If any imports succeeded, notify parent to refresh
+      if (result.imported > 0) {
+        onImportComplete();
+      }
+    } catch (err) {
+      setImportResult({
+        success: false,
+        imported: 0,
+        failed: parsedData.length,
+        message: err.message || 'Import failed'
+      });
+    } finally {
+      setImporting(false);
+    }
+  };
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Upload className="h-5 w-5" />
+            Import Documents
+          </DialogTitle>
+          <DialogDescription>
+            Upload a JSON or CSV file to bulk import documents to the knowledge base
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4 py-4">
+          {/* ─────────────────────────────────────────────────────────────────
+              FILE FORMAT INFO
+              ───────────────────────────────────────────────────────────────── */}
+          <div className="space-y-3">
+            <div className="grid grid-cols-2 gap-4">
+              <div className="p-3 rounded-lg border bg-muted/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <FileJson className="h-4 w-4 text-blue-500" />
+                  <span className="font-medium text-sm">JSON Format</span>
+                </div>
+                <pre className="text-xs text-muted-foreground overflow-x-auto">
+{`[{
+  "title": "Part Name",
+  "category": "Brakes",
+  "content": "Description...",
+  "keywords": ["keyword1"]
+}]`}
+                </pre>
+              </div>
+              <div className="p-3 rounded-lg border bg-muted/50">
+                <div className="flex items-center gap-2 mb-2">
+                  <FileSpreadsheet className="h-4 w-4 text-green-500" />
+                  <span className="font-medium text-sm">CSV - Standard</span>
+                </div>
+                <pre className="text-xs text-muted-foreground overflow-x-auto">
+{`title,category,content,keywords
+Part A,Brakes,Desc...,key1;key2`}
+                </pre>
+              </div>
+            </div>
+            <div className="p-3 rounded-lg border bg-green-500/10">
+              <div className="flex items-center gap-2 mb-2">
+                <FileSpreadsheet className="h-4 w-4 text-green-500" />
+                <span className="font-medium text-sm">CSV - Spare Parts Format (Auto-detected)</span>
+              </div>
+              <pre className="text-xs text-muted-foreground overflow-x-auto">
+{`vehicle_make,vehicle_model,year_from,year_to,part_number,part_category,part_description,price_gbp,price_usd,stock_status,compatibility_notes`}
+              </pre>
+              <p className="text-xs text-muted-foreground mt-2">
+                Auto-transforms into searchable knowledge base entries with vehicle, pricing, and availability info.
+              </p>
+            </div>
+          </div>
+
+          {/* ─────────────────────────────────────────────────────────────────
+              FILE INPUT
+              ───────────────────────────────────────────────────────────────── */}
+          <div className="space-y-2">
+            <Label>Select File</Label>
+            <div className="flex gap-2">
+              <Input
+                ref={fileInputRef}
+                type="file"
+                accept=".json,.csv"
+                onChange={handleFileSelect}
+                className="flex-1"
+              />
+            </div>
+            {fileName && !parseError && !importResult && (
+              <p className="text-sm text-muted-foreground">
+                Selected: {fileName}
+              </p>
+            )}
+          </div>
+
+          {/* ─────────────────────────────────────────────────────────────────
+              PARSE ERROR
+              ───────────────────────────────────────────────────────────────── */}
+          {parseError && (
+            <div className="flex items-center gap-2 p-3 rounded-lg bg-destructive/10 text-destructive">
+              <AlertCircle className="h-4 w-4" />
+              <span className="text-sm">{parseError}</span>
+            </div>
+          )}
+
+          {/* ─────────────────────────────────────────────────────────────────
+              PARSED DATA PREVIEW
+              ───────────────────────────────────────────────────────────────── */}
+          {parsedData.length > 0 && !importResult && (
+            <div className="space-y-2">
+              <Label>Preview ({parsedData.length} documents)</Label>
+              <div className="border rounded-lg max-h-[200px] overflow-y-auto">
+                <table className="w-full text-sm">
+                  <thead className="bg-muted sticky top-0">
+                    <tr>
+                      <th className="text-left p-2">#</th>
+                      <th className="text-left p-2">Title</th>
+                      <th className="text-left p-2">Category</th>
+                      <th className="text-left p-2">Content</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {parsedData.slice(0, 10).map((doc, i) => (
+                      <tr key={i} className="border-t">
+                        <td className="p-2 text-muted-foreground">{i + 1}</td>
+                        <td className="p-2 font-medium truncate max-w-[150px]">{doc.title}</td>
+                        <td className="p-2">
+                          <Badge variant="outline">{doc.category}</Badge>
+                        </td>
+                        <td className="p-2 text-muted-foreground truncate max-w-[200px]">
+                          {doc.content.substring(0, 50)}...
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                {parsedData.length > 10 && (
+                  <p className="text-xs text-muted-foreground text-center py-2 border-t">
+                    ... and {parsedData.length - 10} more documents
+                  </p>
+                )}
+              </div>
+            </div>
+          )}
+
+          {/* ─────────────────────────────────────────────────────────────────
+              IMPORT RESULT
+              ───────────────────────────────────────────────────────────────── */}
+          {importResult && (
+            <div className={`p-4 rounded-lg ${importResult.success ? 'bg-green-500/10' : 'bg-destructive/10'}`}>
+              <div className="flex items-center gap-2 mb-2">
+                {importResult.success ? (
+                  <CheckCircle2 className="h-5 w-5 text-green-500" />
+                ) : (
+                  <AlertCircle className="h-5 w-5 text-destructive" />
+                )}
+                <span className="font-medium">
+                  {importResult.message}
+                </span>
+              </div>
+              <div className="text-sm text-muted-foreground">
+                <p>Imported: {importResult.imported}</p>
+                {importResult.failed > 0 && (
+                  <p>Failed: {importResult.failed}</p>
+                )}
+              </div>
+              {importResult.errors?.length > 0 && (
+                <div className="mt-2 text-xs">
+                  <p className="text-destructive">Errors:</p>
+                  <ul className="list-disc list-inside">
+                    {importResult.errors.slice(0, 5).map((err, i) => (
+                      <li key={i}>{err.title}: {err.error}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
+          )}
+        </div>
+
+        {/* ─────────────────────────────────────────────────────────────────────
+            DIALOG FOOTER
+            ───────────────────────────────────────────────────────────────────── */}
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            {importResult ? 'Close' : 'Cancel'}
+          </Button>
+          {!importResult && (
+            <Button
+              onClick={handleImport}
+              disabled={parsedData.length === 0 || importing}
+            >
+              {importing ? (
+                <>
+                  <Loader2 className="mr-2 h-4 w-4 animate-spin" />
+                  Importing...
+                </>
+              ) : (
+                <>
+                  <Upload className="mr-2 h-4 w-4" />
+                  Import {parsedData.length} Documents
+                </>
+              )}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // MAIN COMPONENT
 // ═══════════════════════════════════════════════════════════════════════════════
 
@@ -296,6 +797,7 @@ export default function KnowledgeBasePage() {
   const [deleteDoc, setDeleteDoc] = useState(null);      // Document pending deletion
   const [deleting, setDeleting] = useState(false);       // Delete in progress
   const [page, setPage] = useState(1);                   // Current page number
+  const [importDialogOpen, setImportDialogOpen] = useState(false); // Import dialog state
   const limit = 10;  // Items per page
 
   // ─────────────────────────────────────────────────────────────────────────────
@@ -421,10 +923,16 @@ export default function KnowledgeBasePage() {
             Manage documents used for RAG responses
           </p>
         </div>
-        <Button onClick={() => { setEditingDoc(null); setDialogOpen(true); }}>
-          <Plus className="h-4 w-4 mr-2" />
-          Add Document
-        </Button>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+            <Upload className="h-4 w-4 mr-2" />
+            Import File
+          </Button>
+          <Button onClick={() => { setEditingDoc(null); setDialogOpen(true); }}>
+            <Plus className="h-4 w-4 mr-2" />
+            Add Document
+          </Button>
+        </div>
       </div>
 
       {/* ═══════════════════════════════════════════════════════════════════════
@@ -474,10 +982,16 @@ export default function KnowledgeBasePage() {
             <p className="text-muted-foreground text-center mb-4">
               Add documents to your knowledge base to enable RAG responses
             </p>
-            <Button onClick={() => { setEditingDoc(null); setDialogOpen(true); }}>
-              <Plus className="h-4 w-4 mr-2" />
-              Add Your First Document
-            </Button>
+            <div className="flex gap-2">
+              <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+                <Upload className="h-4 w-4 mr-2" />
+                Import from File
+              </Button>
+              <Button onClick={() => { setEditingDoc(null); setDialogOpen(true); }}>
+                <Plus className="h-4 w-4 mr-2" />
+                Add Document
+              </Button>
+            </div>
           </CardContent>
         </Card>
       ) : (
@@ -624,6 +1138,15 @@ export default function KnowledgeBasePage() {
           </AlertDialogFooter>
         </AlertDialogContent>
       </AlertDialog>
+
+      {/* ═══════════════════════════════════════════════════════════════════════
+          FILE IMPORT DIALOG
+          ═══════════════════════════════════════════════════════════════════════ */}
+      <ImportDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImportComplete={loadDocuments}
+      />
     </div>
   );
 }

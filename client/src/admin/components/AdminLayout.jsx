@@ -156,9 +156,13 @@ export default function AdminLayout({ children }) {
             <nav className="flex flex-col gap-1">
               {navItems.map((item) => {
                 // Determine if this route is active
-                // Exact match for /admin, prefix match for others
+                // Exact match for /admin, or path matches with boundary check
+                // (prevents /admin/moderation matching /admin/moderation-settings)
                 const isActive = location.pathname === item.href ||
-                  (item.href !== '/admin' && location.pathname.startsWith(item.href));
+                  (item.href !== '/admin' && (
+                    location.pathname.startsWith(item.href + '/') ||
+                    location.pathname === item.href
+                  ));
                 return (
                   <Link
                     key={item.href}
@@ -234,8 +238,12 @@ export default function AdminLayout({ children }) {
         <div className="md:hidden border-b bg-sidebar px-2 py-2">
           <nav className="flex gap-1 overflow-x-auto">
             {navItems.map((item) => {
+              // Path boundary check to prevent /admin/moderation matching /admin/moderation-settings
               const isActive = location.pathname === item.href ||
-                (item.href !== '/admin' && location.pathname.startsWith(item.href));
+                (item.href !== '/admin' && (
+                  location.pathname.startsWith(item.href + '/') ||
+                  location.pathname === item.href
+                ));
               return (
                 <Link
                   key={item.href}

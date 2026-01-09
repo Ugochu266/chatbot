@@ -178,6 +178,19 @@ function ChatContainer({ conversationId, onConversationCreate }) {
           createdAt: result.assistantMessage.createdAt,
           isProcessing: false
         });
+      } else if (result?.blocked) {
+        // ─────────────────────────────────────────────────────────────────────────
+        // BLOCKED: Message was blocked by safety rules
+        // Show the block reason/message to the user
+        // ─────────────────────────────────────────────────────────────────────────
+        replaceLastMessage({
+          id: `blocked-${Date.now()}`,
+          role: 'assistant',
+          content: result.message || 'Your message could not be processed due to content restrictions.',
+          createdAt: new Date().toISOString(),
+          isProcessing: false,
+          isError: true
+        });
       }
     } catch (err) {
       // ─────────────────────────────────────────────────────────────────────────
