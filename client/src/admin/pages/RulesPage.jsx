@@ -1,3 +1,39 @@
+/**
+ * Safety Rules Management Page
+ *
+ * This page provides comprehensive management of safety rules including regex patterns,
+ * blocked keywords, escalation triggers, and allowed topics. Rules are evaluated against
+ * user input to ensure safe and appropriate chatbot interactions.
+ *
+ * Rule Types:
+ * - regex_pattern: Custom regex patterns for detecting specific content
+ * - blocked_keyword: Simple keyword matching (case-insensitive)
+ * - escalation_keyword: Keywords that trigger human escalation
+ * - allowed_topic: Topics the chatbot is permitted to discuss
+ *
+ * Rule Actions:
+ * - block: Completely block the message
+ * - escalate: Flag for human review
+ * - flag: Log but allow through
+ * - warn: Show warning but allow
+ *
+ * Categories:
+ * - Injection: prompt injection, jailbreak attempts
+ * - Content: profanity, slurs, inappropriate, threats
+ * - Spam: promotional content, PII
+ * - Escalation: crisis, legal, complaint, sentiment
+ *
+ * Features:
+ * - CRUD operations for all rule types
+ * - Rule testing interface (test single rule or all rules)
+ * - Search and filter by type
+ * - Priority-based rule ordering
+ * - Enable/disable individual rules
+ * - Export rules as JSON
+ *
+ * @module admin/pages/RulesPage
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Shield,
@@ -62,6 +98,14 @@ import {
   testAllRules
 } from '../../services/rulesService';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// Configuration options for rule forms
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Available rule types for the safety rule engine.
+ */
 const RULE_TYPES = [
   { value: 'regex_pattern', label: 'Regex Pattern' },
   { value: 'blocked_keyword', label: 'Blocked Keyword' },
@@ -69,6 +113,9 @@ const RULE_TYPES = [
   { value: 'allowed_topic', label: 'Allowed Topic' }
 ];
 
+/**
+ * Actions that can be taken when a rule matches.
+ */
 const ACTIONS = [
   { value: 'block', label: 'Block' },
   { value: 'escalate', label: 'Escalate' },
@@ -76,6 +123,9 @@ const ACTIONS = [
   { value: 'warn', label: 'Warn' }
 ];
 
+/**
+ * Categories for organizing rules by purpose.
+ */
 const CATEGORIES = [
   'injection', 'bypass', 'extraction',
   'profanity', 'slur', 'inappropriate', 'threat',
@@ -84,7 +134,28 @@ const CATEGORIES = [
   'custom'
 ];
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPER COMPONENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Modal dialog for creating or editing safety rules.
+ *
+ * Includes a built-in test panel to verify rule patterns before saving.
+ *
+ * @param {Object} props - Component props
+ * @param {Object|null} props.rule - Existing rule to edit, or null for create
+ * @param {boolean} props.open - Whether dialog is open
+ * @param {Function} props.onClose - Close handler
+ * @param {Function} props.onSave - Save handler (receives form data)
+ * @param {Object} props.meta - Metadata from rules API
+ * @returns {React.ReactElement} Rule form dialog
+ */
 function RuleDialog({ rule, open, onClose, onSave, meta }) {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOCAL STATE
+  // Form fields and test panel state
+  // ─────────────────────────────────────────────────────────────────────────────
   const [formData, setFormData] = useState({
     ruleType: 'regex_pattern',
     category: '',
@@ -99,8 +170,13 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
   const [testResult, setTestResult] = useState(null);
   const [testing, setTesting] = useState(false);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FORM INITIALIZATION
+  // Populate form when rule changes or dialog opens
+  // ─────────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (rule) {
+      // Editing existing rule - populate form
       setFormData({
         ruleType: rule.ruleType || 'regex_pattern',
         category: rule.category || '',
@@ -111,6 +187,7 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
         description: rule.description || ''
       });
     } else {
+      // Creating new rule - reset form to defaults
       setFormData({
         ruleType: 'regex_pattern',
         category: '',
@@ -121,10 +198,15 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
         description: ''
       });
     }
+    // Reset test state
     setTestResult(null);
     setTestText('');
   }, [rule, open]);
 
+  /**
+   * Handles form submission.
+   * Validates and saves the rule.
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
@@ -138,6 +220,10 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
     }
   };
 
+  /**
+   * Tests the current rule pattern against test text.
+   * Calls the API to evaluate the pattern.
+   */
   const handleTest = async () => {
     if (!testText || !formData.value) return;
     setTesting(true);
@@ -151,10 +237,16 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl max-h-[90vh] overflow-y-auto">
         <form onSubmit={handleSubmit}>
+          {/* ─────────────────────────────────────────────────────────────────
+              DIALOG HEADER
+              ───────────────────────────────────────────────────────────────── */}
           <DialogHeader>
             <DialogTitle>{rule ? 'Edit Rule' : 'Add Rule'}</DialogTitle>
             <DialogDescription>
@@ -162,8 +254,13 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
             </DialogDescription>
           </DialogHeader>
 
+          {/* ─────────────────────────────────────────────────────────────────
+              FORM FIELDS
+              ───────────────────────────────────────────────────────────────── */}
           <div className="space-y-4 py-4">
+            {/* Rule type and category row */}
             <div className="grid grid-cols-2 gap-4">
+              {/* Rule type selector */}
               <div className="space-y-2">
                 <Label>Rule Type</Label>
                 <Select
@@ -181,6 +278,7 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
                 </Select>
               </div>
 
+              {/* Category selector */}
               <div className="space-y-2">
                 <Label>Category</Label>
                 <Select
@@ -199,6 +297,7 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
               </div>
             </div>
 
+            {/* Rule value/pattern */}
             <div className="space-y-2">
               <Label htmlFor="value">
                 {formData.ruleType === 'regex_pattern' ? 'Regex Pattern' : 'Keyword/Value'}
@@ -220,7 +319,9 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
               )}
             </div>
 
+            {/* Action and priority row */}
             <div className="grid grid-cols-2 gap-4">
+              {/* Action selector */}
               <div className="space-y-2">
                 <Label>Action</Label>
                 <Select
@@ -238,6 +339,7 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
                 </Select>
               </div>
 
+              {/* Priority input */}
               <div className="space-y-2">
                 <Label htmlFor="priority">Priority</Label>
                 <Input
@@ -249,6 +351,7 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
               </div>
             </div>
 
+            {/* Description */}
             <div className="space-y-2">
               <Label htmlFor="description">Description</Label>
               <Input
@@ -259,6 +362,7 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
               />
             </div>
 
+            {/* Enabled toggle */}
             <div className="flex items-center space-x-2">
               <Switch
                 id="enabled"
@@ -268,7 +372,10 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
               <Label htmlFor="enabled">Enabled</Label>
             </div>
 
-            {/* Test Panel */}
+            {/* ─────────────────────────────────────────────────────────────────
+                TEST PANEL
+                Test the rule pattern before saving
+                ───────────────────────────────────────────────────────────────── */}
             <Card className="bg-muted/50">
               <CardHeader className="py-3">
                 <CardTitle className="text-sm">Test Rule</CardTitle>
@@ -291,6 +398,7 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
                     {testing ? <Loader2 className="h-4 w-4 animate-spin" /> : <Play className="h-4 w-4" />}
                   </Button>
                 </div>
+                {/* Test result display */}
                 {testResult && (
                   <div className={`p-2 rounded text-sm ${testResult.matched ? 'bg-destructive/10 text-destructive' : 'bg-green-500/10 text-green-600'}`}>
                     {testResult.matched ? (
@@ -304,6 +412,9 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
             </Card>
           </div>
 
+          {/* ─────────────────────────────────────────────────────────────────
+              DIALOG FOOTER
+              ───────────────────────────────────────────────────────────────── */}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
             <Button type="submit" disabled={saving}>
@@ -316,24 +427,47 @@ function RuleDialog({ rule, open, onClose, onSave, meta }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Main safety rules management page component.
+ *
+ * Provides comprehensive interface for managing all safety rules including
+ * CRUD operations, testing, filtering, and export functionality.
+ *
+ * @returns {React.ReactElement} Rules page UI
+ */
 export default function RulesPage() {
-  const [rules, setRules] = useState([]);
-  const [meta, setMeta] = useState({});
-  const [loading, setLoading] = useState(true);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [filterType, setFilterType] = useState('all');
-  const [editingRule, setEditingRule] = useState(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteRuleItem, setDeleteRuleItem] = useState(null);
-  const [deleting, setDeleting] = useState(false);
-  const [page, setPage] = useState(1);
-  const limit = 10;
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STATE
+  // ─────────────────────────────────────────────────────────────────────────────
+  const [rules, setRules] = useState([]);              // All rules
+  const [meta, setMeta] = useState({});                // API metadata
+  const [loading, setLoading] = useState(true);        // Initial loading state
+  const [searchQuery, setSearchQuery] = useState('');  // Search filter
+  const [filterType, setFilterType] = useState('all'); // Rule type filter
+  const [editingRule, setEditingRule] = useState(null);  // Rule being edited
+  const [dialogOpen, setDialogOpen] = useState(false);   // Create/edit dialog state
+  const [deleteRuleItem, setDeleteRuleItem] = useState(null);  // Rule pending deletion
+  const [deleting, setDeleting] = useState(false);     // Delete in progress
+  const [page, setPage] = useState(1);                 // Current page number
+  const limit = 10;  // Items per page
 
   // Test panel state
-  const [testText, setTestText] = useState('');
-  const [testResult, setTestResult] = useState(null);
-  const [testing, setTesting] = useState(false);
+  const [testText, setTestText] = useState('');        // Test input text
+  const [testResult, setTestResult] = useState(null);  // Test result from API
+  const [testing, setTesting] = useState(false);       // Test in progress
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DATA LOADING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Loads rules from API with optional type filter.
+   * Memoized with useCallback to prevent unnecessary re-fetches.
+   */
   const loadRules = useCallback(async () => {
     try {
       setLoading(true);
@@ -349,10 +483,19 @@ export default function RulesPage() {
     }
   }, [filterType]);
 
+  // Reload rules when filter changes
   useEffect(() => {
     loadRules();
   }, [loadRules]);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CRUD HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Saves a rule (create or update).
+   * Called by RuleDialog on form submission.
+   */
   const handleSave = async (data) => {
     if (editingRule) {
       await updateRule(editingRule.id, data);
@@ -362,6 +505,10 @@ export default function RulesPage() {
     loadRules();
   };
 
+  /**
+   * Deletes the rule pending in deleteRuleItem state.
+   * Called when user confirms deletion dialog.
+   */
   const handleDelete = async () => {
     if (!deleteRuleItem) return;
     setDeleting(true);
@@ -376,6 +523,9 @@ export default function RulesPage() {
     }
   };
 
+  /**
+   * Exports all rules as a JSON file download.
+   */
   const handleExport = async () => {
     try {
       const data = await exportRules();
@@ -391,6 +541,10 @@ export default function RulesPage() {
     }
   };
 
+  /**
+   * Tests input text against all rules.
+   * Shows comprehensive results including all matched rules.
+   */
   const handleTestAll = async () => {
     if (!testText.trim()) return;
     setTesting(true);
@@ -404,21 +558,30 @@ export default function RulesPage() {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CLIENT-SIDE FILTERING
+  // Filter rules by search query
+  // ─────────────────────────────────────────────────────────────────────────────
   const filteredRules = rules.filter(rule =>
     searchQuery === '' ||
     rule.value.toLowerCase().includes(searchQuery.toLowerCase()) ||
     (rule.description && rule.description.toLowerCase().includes(searchQuery.toLowerCase()))
   );
 
-  // Pagination
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PAGINATION
+  // ─────────────────────────────────────────────────────────────────────────────
   const totalPages = Math.ceil(filteredRules.length / limit);
   const paginatedRules = filteredRules.slice((page - 1) * limit, page * limit);
 
-  // Reset to page 1 when search/filter changes
+  // Reset to page 1 when filters change
   useEffect(() => {
     setPage(1);
   }, [searchQuery, filterType]);
 
+  /**
+   * Returns badge variant based on rule action severity.
+   */
   const getActionBadgeVariant = (action) => {
     switch (action) {
       case 'block': return 'destructive';
@@ -428,6 +591,9 @@ export default function RulesPage() {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOADING STATE
+  // ─────────────────────────────────────────────────────────────────────────────
   if (loading && rules.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -436,8 +602,15 @@ export default function RulesPage() {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
+      {/* ═══════════════════════════════════════════════════════════════════════
+          PAGE HEADER
+          Title and action buttons
+          ═══════════════════════════════════════════════════════════════════════ */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Safety Rules</h1>
@@ -457,7 +630,10 @@ export default function RulesPage() {
         </div>
       </div>
 
-      {/* Test Panel */}
+      {/* ═══════════════════════════════════════════════════════════════════════
+          TEST ALL RULES PANEL
+          Test input against all safety rules at once
+          ═══════════════════════════════════════════════════════════════════════ */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -469,6 +645,7 @@ export default function RulesPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Test input */}
           <div className="flex gap-2">
             <Textarea
               placeholder="Enter text to test against safety rules (e.g., profanity, spam, prompt injection attempts)..."
@@ -482,6 +659,7 @@ export default function RulesPage() {
             </Button>
           </div>
 
+          {/* Test results display */}
           {testResult && (
             <div className={`p-4 rounded-lg space-y-3 ${
               testResult.wouldBlock ? 'bg-destructive/10' :
@@ -490,6 +668,7 @@ export default function RulesPage() {
               testResult.wouldFlag ? 'bg-blue-500/10' :
               'bg-green-500/10'
             }`}>
+              {/* Overall result summary */}
               <div className="flex items-center gap-2 flex-wrap">
                 <Badge variant={
                   testResult.wouldBlock ? 'destructive' :
@@ -508,6 +687,7 @@ export default function RulesPage() {
                 )}
               </div>
 
+              {/* Matched rules list */}
               {testResult.matches?.length > 0 && (
                 <div className="space-y-2">
                   <p className="text-sm font-medium">Matched Rules:</p>
@@ -551,6 +731,7 @@ export default function RulesPage() {
                 </div>
               )}
 
+              {/* No matches message */}
               {testResult.matchCount === 0 && (
                 <p className="text-sm text-green-600">
                   No safety rules were triggered. This input would be allowed through.
@@ -561,6 +742,9 @@ export default function RulesPage() {
         </CardContent>
       </Card>
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          SEARCH AND FILTER BAR
+          ═══════════════════════════════════════════════════════════════════════ */}
       <div className="flex gap-4">
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
@@ -585,6 +769,9 @@ export default function RulesPage() {
         </Select>
       </div>
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          RULES TABLE
+          ═══════════════════════════════════════════════════════════════════════ */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -597,12 +784,14 @@ export default function RulesPage() {
         </CardHeader>
         <CardContent>
           {filteredRules.length === 0 ? (
+            /* Empty state */
             <div className="text-center py-12">
               <Shield className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
               <p className="text-muted-foreground">No rules found</p>
             </div>
           ) : (
             <>
+              {/* Rules data table */}
               <Table>
                 <TableHeader>
                   <TableRow>
@@ -659,7 +848,7 @@ export default function RulesPage() {
                 </TableBody>
               </Table>
 
-              {/* Pagination */}
+              {/* Pagination controls */}
               {totalPages > 1 && (
                 <div className="flex items-center justify-between mt-4 pt-4 border-t">
                   <p className="text-sm text-muted-foreground">
@@ -693,6 +882,9 @@ export default function RulesPage() {
         </CardContent>
       </Card>
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          CREATE/EDIT RULE DIALOG
+          ═══════════════════════════════════════════════════════════════════════ */}
       <RuleDialog
         rule={editingRule}
         open={dialogOpen}
@@ -701,6 +893,9 @@ export default function RulesPage() {
         meta={meta}
       />
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          DELETE CONFIRMATION DIALOG
+          ═══════════════════════════════════════════════════════════════════════ */}
       <AlertDialog open={!!deleteRuleItem} onOpenChange={() => setDeleteRuleItem(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

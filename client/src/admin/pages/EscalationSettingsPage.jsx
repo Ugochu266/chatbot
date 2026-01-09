@@ -1,3 +1,34 @@
+/**
+ * Escalation Settings Page
+ *
+ * This page allows admins to configure keyword-based escalation triggers that
+ * cause conversations to be flagged for human agent review. Escalation is
+ * separate from content moderation - it's about detecting when a customer
+ * needs human assistance regardless of content safety.
+ *
+ * Escalation Categories:
+ * - Crisis: Mental health emergencies, self-harm indicators (CRITICAL priority)
+ * - Legal: Legal threats, lawyer mentions, lawsuit references (HIGH priority)
+ * - Complaint: Customer complaints, manager requests, escalation demands (MEDIUM priority)
+ * - Sentiment: Highly negative emotional content, frustration (MEDIUM priority)
+ *
+ * Configuration per category:
+ * - Keywords: Words/phrases that trigger escalation
+ * - Response Template: Custom message shown when escalation triggers
+ * - Priority: Ordering when multiple triggers match
+ * - Enabled: Whether this category is active
+ *
+ * Features:
+ * - Tabbed interface for each category
+ * - Dynamic keyword management (add/remove)
+ * - Custom response templates
+ * - Priority ordering
+ * - Test panel to check detection
+ * - Visual feedback for unsaved changes
+ *
+ * @module admin/pages/EscalationSettingsPage
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Loader2,
@@ -21,6 +52,20 @@ import {
   testEscalation
 } from '../../services/rulesService';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// Escalation category metadata
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Metadata for each escalation category.
+ * Includes display info and urgency level for prioritization.
+ *
+ * Urgency levels:
+ * - critical: Immediate human intervention needed (e.g., crisis)
+ * - high: Important but not life-threatening (e.g., legal)
+ * - medium: Standard escalation (e.g., complaints)
+ */
 const CATEGORY_INFO = {
   'crisis': {
     label: 'Crisis',
@@ -48,9 +93,30 @@ const CATEGORY_INFO = {
   }
 };
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// KEYWORD INPUT COMPONENT
+// Reusable component for managing keyword lists
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Keyword management input component.
+ *
+ * Provides an input field for adding keywords and displays existing
+ * keywords as removable badges. Supports Enter key for quick addition.
+ *
+ * @param {Object} props - Component props
+ * @param {string[]} props.keywords - Current list of keywords
+ * @param {Function} props.onChange - Callback when keywords change
+ * @returns {React.ReactElement} The keyword input component
+ */
 function KeywordInput({ keywords, onChange }) {
+  // Local state for the input field
   const [inputValue, setInputValue] = useState('');
 
+  /**
+   * Add the current input value as a new keyword.
+   * Prevents duplicates and empty values.
+   */
   const handleAdd = () => {
     const trimmed = inputValue.trim();
     if (trimmed && !keywords.includes(trimmed)) {
@@ -59,10 +125,18 @@ function KeywordInput({ keywords, onChange }) {
     }
   };
 
+  /**
+   * Remove a keyword from the list.
+   * @param {string} keyword - Keyword to remove
+   */
   const handleRemove = (keyword) => {
     onChange(keywords.filter(k => k !== keyword));
   };
 
+  /**
+   * Handle Enter key press to add keyword.
+   * @param {React.KeyboardEvent} e - Keyboard event
+   */
   const handleKeyDown = (e) => {
     if (e.key === 'Enter') {
       e.preventDefault();
@@ -72,6 +146,7 @@ function KeywordInput({ keywords, onChange }) {
 
   return (
     <div className="space-y-2">
+      {/* Input field with add button */}
       <div className="flex gap-2">
         <Input
           value={inputValue}
@@ -84,6 +159,8 @@ function KeywordInput({ keywords, onChange }) {
           <Plus className="h-4 w-4" />
         </Button>
       </div>
+
+      {/* Keyword badges display */}
       <div className="flex flex-wrap gap-1.5 min-h-[60px] p-2 rounded-md border bg-muted/50">
         {keywords.length === 0 ? (
           <span className="text-xs text-muted-foreground">No keywords added</span>
@@ -91,6 +168,7 @@ function KeywordInput({ keywords, onChange }) {
           keywords.map((keyword, i) => (
             <Badge key={i} variant="secondary" className="gap-1">
               {keyword}
+              {/* Remove button for each keyword */}
               <button
                 type="button"
                 onClick={() => handleRemove(keyword)}
@@ -106,39 +184,86 @@ function KeywordInput({ keywords, onChange }) {
   );
 }
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CATEGORY TAB COMPONENT
+// Configuration form for a single escalation category
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Configuration tab content for a single escalation category.
+ *
+ * Displays a card with all configuration options for one category:
+ * keywords, response template, priority, and enabled state.
+ * Maintains local state for edits until explicitly saved.
+ *
+ * @param {Object} props - Component props
+ * @param {string} props.category - Category ID (e.g., 'crisis', 'legal')
+ * @param {Object} props.setting - Current setting values
+ * @param {Function} props.onUpdate - Callback to save changes
+ * @param {boolean} props.saving - Whether save is in progress
+ * @returns {React.ReactElement} The category configuration tab content
+ */
 function CategoryTab({ category, setting, onUpdate, saving }) {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOCAL STATE
+  // Track edited values separate from props until saved
+  // ─────────────────────────────────────────────────────────────────────────────
   const [localSetting, setLocalSetting] = useState(setting);
   const [hasChanges, setHasChanges] = useState(false);
 
+  // Reset local state when props change (after save or external update)
   useEffect(() => {
     setLocalSetting(setting);
     setHasChanges(false);
   }, [setting]);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // EVENT HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Update a single field in local state.
+   * @param {string} field - Field name to update
+   * @param {*} value - New value for the field
+   */
   const handleChange = (field, value) => {
     setLocalSetting(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
+  /**
+   * Save local changes to server.
+   */
   const handleSave = async () => {
     await onUpdate(category, localSetting);
     setHasChanges(false);
   };
 
+  // Get display info for this category
   const info = CATEGORY_INFO[category] || { label: category, description: '', urgency: 'normal', color: '' };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
       <Card>
+        {/* ─────────────────────────────────────────────────────────────────────────
+            CARD HEADER
+            Category name, urgency badge, and enable toggle
+            ───────────────────────────────────────────────────────────────────────── */}
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
             <div>
               <CardTitle className="flex items-center gap-2">
+                {/* Category name with color coding */}
                 <span className={info.color}>{info.label}</span>
+                {/* Urgency level badge */}
                 <Badge variant="outline">{info.urgency}</Badge>
               </CardTitle>
               <CardDescription>{info.description}</CardDescription>
             </div>
+            {/* Enable/Disable toggle */}
             <div className="flex items-center gap-2">
               <Label htmlFor={`enabled-${category}`} className="text-sm">Enabled</Label>
               <Switch
@@ -149,7 +274,12 @@ function CategoryTab({ category, setting, onUpdate, saving }) {
             </div>
           </div>
         </CardHeader>
+
         <CardContent className="space-y-6">
+          {/* ─────────────────────────────────────────────────────────────────────────
+              KEYWORDS SECTION
+              Add/remove trigger keywords for this category
+              ───────────────────────────────────────────────────────────────────────── */}
           <div className="space-y-2">
             <Label>Keywords</Label>
             <p className="text-xs text-muted-foreground mb-2">
@@ -161,6 +291,10 @@ function CategoryTab({ category, setting, onUpdate, saving }) {
             />
           </div>
 
+          {/* ─────────────────────────────────────────────────────────────────────────
+              RESPONSE TEMPLATE
+              Custom message shown to user when escalation triggers
+              ───────────────────────────────────────────────────────────────────────── */}
           <div className="space-y-2">
             <Label htmlFor="responseTemplate">Response Template</Label>
             <p className="text-xs text-muted-foreground mb-2">
@@ -175,6 +309,10 @@ function CategoryTab({ category, setting, onUpdate, saving }) {
             />
           </div>
 
+          {/* ─────────────────────────────────────────────────────────────────────────
+              PRIORITY SETTING
+              Determines order when multiple escalations match
+              ───────────────────────────────────────────────────────────────────────── */}
           <div className="space-y-2">
             <Label htmlFor="priority">Priority</Label>
             <Input
@@ -189,6 +327,10 @@ function CategoryTab({ category, setting, onUpdate, saving }) {
             </p>
           </div>
 
+          {/* ─────────────────────────────────────────────────────────────────────────
+              SAVE BUTTON
+              Only shown when there are unsaved changes
+              ───────────────────────────────────────────────────────────────────────── */}
           {hasChanges && (
             <Button onClick={handleSave} disabled={saving}>
               {saving ? <Loader2 className="h-4 w-4 animate-spin mr-2" /> : <Save className="h-4 w-4 mr-2" />}
@@ -201,25 +343,50 @@ function CategoryTab({ category, setting, onUpdate, saving }) {
   );
 }
 
-export default function EscalationSettingsPage() {
-  const [settings, setSettings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [activeTab, setActiveTab] = useState('crisis');
-  const [testText, setTestText] = useState('');
-  const [testResult, setTestResult] = useState(null);
-  const [testing, setTesting] = useState(false);
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN PAGE COMPONENT
+// Escalation settings configuration page
+// ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Main escalation settings page component.
+ *
+ * Displays tabbed interface for configuring each escalation category
+ * and a test panel for verifying detection behavior.
+ *
+ * @returns {React.ReactElement} The escalation settings page
+ */
+export default function EscalationSettingsPage() {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STATE
+  // ─────────────────────────────────────────────────────────────────────────────
+  const [settings, setSettings] = useState([]);         // Array of category settings
+  const [loading, setLoading] = useState(true);         // Initial load in progress
+  const [saving, setSaving] = useState(false);          // Save operation in progress
+  const [activeTab, setActiveTab] = useState('crisis'); // Currently selected tab
+  const [testText, setTestText] = useState('');         // Text to test in test panel
+  const [testResult, setTestResult] = useState(null);   // Result from test API
+  const [testing, setTesting] = useState(false);        // Test operation in progress
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DATA LOADING
+  // Fetch settings from server on mount
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Load escalation settings from server.
+   * Merges server settings with defaults for all categories.
+   */
   const loadSettings = useCallback(async () => {
     try {
       setLoading(true);
       const response = await getEscalationSettings();
 
-      // Create settings for all categories
+      // Create default settings for all known categories
       const allCategories = Object.keys(CATEGORY_INFO);
       const settingsMap = {};
 
-      // Default settings for each category
+      // Initialize with default values based on urgency
       allCategories.forEach(cat => {
         const info = CATEGORY_INFO[cat];
         settingsMap[cat] = {
@@ -227,11 +394,12 @@ export default function EscalationSettingsPage() {
           enabled: true,
           keywords: [],
           responseTemplate: '',
+          // Set priority based on urgency level
           priority: info.urgency === 'critical' ? 100 : info.urgency === 'high' ? 80 : info.urgency === 'medium' ? 60 : 40
         };
       });
 
-      // Override with actual settings
+      // Override defaults with actual settings from server
       (response.settings || []).forEach(s => {
         settingsMap[s.category] = s;
       });
@@ -244,14 +412,25 @@ export default function EscalationSettingsPage() {
     }
   }, []);
 
+  // Load settings on component mount
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // EVENT HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Update a single category's settings on the server.
+   * @param {string} category - Category ID to update
+   * @param {Object} data - New settings for the category
+   */
   const handleUpdate = async (category, data) => {
     setSaving(true);
     try {
       await updateEscalationSetting(category, data);
+      // Reload all settings to ensure consistency
       loadSettings();
     } catch (err) {
       console.error('Failed to update setting:', err);
@@ -260,6 +439,10 @@ export default function EscalationSettingsPage() {
     }
   };
 
+  /**
+   * Test content against escalation detection.
+   * Shows whether content would trigger escalation and why.
+   */
   const handleTest = async () => {
     if (!testText.trim()) return;
     setTesting(true);
@@ -273,6 +456,12 @@ export default function EscalationSettingsPage() {
     }
   };
 
+  /**
+   * Get settings for a specific category.
+   * Returns defaults if category not found in settings.
+   * @param {string} category - Category ID
+   * @returns {Object} Settings for the category
+   */
   const getSettingByCategory = (category) => {
     return settings.find(s => s.category === category) || {
       category,
@@ -283,6 +472,10 @@ export default function EscalationSettingsPage() {
     };
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOADING STATE
+  // Show spinner while fetching initial data
+  // ─────────────────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -291,8 +484,15 @@ export default function EscalationSettingsPage() {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
+      {/* ═══════════════════════════════════════════════════════════════════════
+          PAGE HEADER
+          Title and description
+          ═══════════════════════════════════════════════════════════════════════ */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Escalation Settings</h1>
         <p className="text-muted-foreground">
@@ -300,7 +500,10 @@ export default function EscalationSettingsPage() {
         </p>
       </div>
 
-      {/* Test Panel */}
+      {/* ═══════════════════════════════════════════════════════════════════════
+          TEST PANEL
+          Test content against escalation detection
+          ═══════════════════════════════════════════════════════════════════════ */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -312,6 +515,7 @@ export default function EscalationSettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Test input and button */}
           <div className="flex gap-2">
             <Textarea
               placeholder="Enter text to test escalation detection..."
@@ -325,10 +529,15 @@ export default function EscalationSettingsPage() {
             </Button>
           </div>
 
+          {/* ─────────────────────────────────────────────────────────────────────
+              TEST RESULTS
+              Shows escalation status, type, urgency, and matched triggers
+              ───────────────────────────────────────────────────────────────────── */}
           {testResult && (
             <div className={`p-4 rounded-lg space-y-2 ${
               testResult.shouldEscalate ? 'bg-destructive/10' : 'bg-muted/50'
             }`}>
+              {/* Result badges - escalation status, type, and urgency */}
               <div className="flex items-center gap-2">
                 <Badge variant={testResult.shouldEscalate ? 'destructive' : 'secondary'}>
                   {testResult.shouldEscalate ? 'Would Escalate' : 'No Escalation'}
@@ -345,11 +554,15 @@ export default function EscalationSettingsPage() {
                   </Badge>
                 )}
               </div>
+
+              {/* Escalation reason */}
               {testResult.reason && (
                 <p className="text-sm text-muted-foreground">
                   Reason: {testResult.reason}
                 </p>
               )}
+
+              {/* Matched trigger keywords */}
               {testResult.triggers?.length > 0 && (
                 <div className="flex flex-wrap gap-1">
                   {testResult.triggers.map((trigger, i) => (
@@ -362,8 +575,12 @@ export default function EscalationSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Category Tabs */}
+      {/* ═══════════════════════════════════════════════════════════════════════
+          CATEGORY TABS
+          One tab per escalation category with full configuration
+          ═══════════════════════════════════════════════════════════════════════ */}
       <Tabs value={activeTab} onValueChange={setActiveTab}>
+        {/* Tab buttons */}
         <TabsList className="grid w-full grid-cols-4">
           {Object.entries(CATEGORY_INFO).map(([cat, info]) => (
             <TabsTrigger key={cat} value={cat} className="gap-1">
@@ -374,6 +591,7 @@ export default function EscalationSettingsPage() {
           ))}
         </TabsList>
 
+        {/* Tab content - one CategoryTab per category */}
         {Object.keys(CATEGORY_INFO).map(category => (
           <TabsContent key={category} value={category}>
             <CategoryTab
@@ -386,7 +604,10 @@ export default function EscalationSettingsPage() {
         ))}
       </Tabs>
 
-      {/* Info Card */}
+      {/* ═══════════════════════════════════════════════════════════════════════
+          INFO CARD
+          Explanation of how escalation works
+          ═══════════════════════════════════════════════════════════════════════ */}
       <Card className="bg-muted/50">
         <CardContent className="pt-6">
           <div className="flex gap-3">

@@ -1,3 +1,37 @@
+/**
+ * Moderation Settings Page
+ *
+ * This page allows admins to configure OpenAI Moderation API thresholds and actions
+ * for each content category. The OpenAI Moderation API returns scores (0-1) for
+ * various harmful content categories. This page lets admins set:
+ * - Threshold: Score above which action is triggered
+ * - Action: What happens when threshold is exceeded (block, escalate, flag, warn)
+ * - Enabled: Whether to check this category at all
+ *
+ * OpenAI Moderation Categories:
+ * - hate: Content expressing hatred toward groups
+ * - hate/threatening: Hateful content with violent threats
+ * - harassment: Content that harasses individuals
+ * - harassment/threatening: Harassment with violent threats
+ * - self-harm: Content about self-harm
+ * - self-harm/intent: Content expressing intent to self-harm
+ * - self-harm/instructions: Instructions for self-harm
+ * - sexual: Sexual content
+ * - sexual/minors: Sexual content involving minors
+ * - violence: Violent content
+ * - violence/graphic: Graphic violent content
+ *
+ * Features:
+ * - Per-category configuration cards
+ * - Threshold slider (0-100%)
+ * - Action dropdown (block, escalate, flag, warn)
+ * - Enable/disable toggle per category
+ * - Test panel to check content against OpenAI API
+ * - Visual feedback for unsaved changes
+ *
+ * @module admin/pages/ModerationSettingsPage
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   Loader2,
@@ -25,6 +59,16 @@ import {
   testModeration
 } from '../../services/rulesService';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CONSTANTS
+// OpenAI moderation category metadata and available actions
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Metadata for each OpenAI moderation category.
+ * Maps category ID to human-readable label and description.
+ * These categories match OpenAI's Moderation API response structure.
+ */
 const CATEGORY_INFO = {
   'hate': { label: 'Hate', description: 'Content that expresses hatred towards a group' },
   'hate/threatening': { label: 'Hate/Threatening', description: 'Hateful content with threats' },
@@ -39,6 +83,10 @@ const CATEGORY_INFO = {
   'violence/graphic': { label: 'Violence/Graphic', description: 'Graphic violent content' }
 };
 
+/**
+ * Available actions when content exceeds moderation threshold.
+ * Each action has different severity and user experience implications.
+ */
 const ACTIONS = [
   { value: 'block', label: 'Block', description: 'Block the message entirely' },
   { value: 'escalate', label: 'Escalate', description: 'Flag for human review' },
@@ -46,45 +94,97 @@ const ACTIONS = [
   { value: 'warn', label: 'Warn', description: 'Show warning but allow' }
 ];
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// CATEGORY CARD COMPONENT
+// Individual card for configuring one moderation category
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Configuration card for a single moderation category.
+ *
+ * Displays controls for threshold, action, and enabled state.
+ * Maintains local state for edits and shows "Save" button when changes exist.
+ * Visual ring indicator shows when card has unsaved changes.
+ *
+ * @param {Object} props - Component props
+ * @param {string} props.category - Category ID (e.g., 'hate', 'violence')
+ * @param {Object} props.setting - Current setting values {enabled, threshold, action}
+ * @param {Function} props.onUpdate - Callback to save changes (category, newSettings)
+ * @param {boolean} props.saving - Whether a save operation is in progress
+ * @returns {React.ReactElement} The category configuration card
+ */
 function CategoryCard({ category, setting, onUpdate, saving }) {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOCAL STATE
+  // Track edited values separate from props until saved
+  // ─────────────────────────────────────────────────────────────────────────────
   const [localSetting, setLocalSetting] = useState(setting);
   const [hasChanges, setHasChanges] = useState(false);
 
+  // Reset local state when props change (after save or external update)
   useEffect(() => {
     setLocalSetting(setting);
     setHasChanges(false);
   }, [setting]);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // EVENT HANDLERS
+  // Handle field changes and save actions
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Update a single field in local state and mark as changed.
+   * @param {string} field - Field name to update
+   * @param {*} value - New value for the field
+   */
   const handleChange = (field, value) => {
     setLocalSetting(prev => ({ ...prev, [field]: value }));
     setHasChanges(true);
   };
 
+  /**
+   * Save local changes to server via parent callback.
+   */
   const handleSave = async () => {
     await onUpdate(category, localSetting);
     setHasChanges(false);
   };
 
+  // Get display info for this category (label, description)
   const info = CATEGORY_INFO[category] || { label: category, description: '' };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <Card className={hasChanges ? 'ring-2 ring-primary/50' : ''}>
+      {/* ─────────────────────────────────────────────────────────────────────────
+          CARD HEADER
+          Category name, description, and enable toggle
+          ───────────────────────────────────────────────────────────────────────── */}
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between">
           <div>
             <CardTitle className="text-base">{info.label}</CardTitle>
             <CardDescription className="text-xs">{info.description}</CardDescription>
           </div>
+          {/* Enable/Disable toggle for this category */}
           <Switch
             checked={localSetting.enabled}
             onCheckedChange={(checked) => handleChange('enabled', checked)}
           />
         </div>
       </CardHeader>
+
       <CardContent className="space-y-4">
+        {/* ─────────────────────────────────────────────────────────────────────────
+            THRESHOLD SLIDER
+            Sets the score threshold that triggers the action (0-100%)
+            ───────────────────────────────────────────────────────────────────────── */}
         <div className="space-y-2">
           <div className="flex items-center justify-between">
             <Label className="text-sm">Threshold</Label>
+            {/* Display current threshold as percentage */}
             <span className="text-sm font-mono">{(localSetting.threshold * 100).toFixed(0)}%</span>
           </div>
           <Slider
@@ -99,6 +199,10 @@ function CategoryCard({ category, setting, onUpdate, saving }) {
           </p>
         </div>
 
+        {/* ─────────────────────────────────────────────────────────────────────────
+            ACTION SELECTOR
+            Dropdown to choose what happens when threshold is exceeded
+            ───────────────────────────────────────────────────────────────────────── */}
         <div className="space-y-2">
           <Label className="text-sm">Action</Label>
           <Select
@@ -121,6 +225,10 @@ function CategoryCard({ category, setting, onUpdate, saving }) {
           </Select>
         </div>
 
+        {/* ─────────────────────────────────────────────────────────────────────────
+            SAVE BUTTON
+            Only shown when there are unsaved changes
+            ───────────────────────────────────────────────────────────────────────── */}
         {hasChanges && (
           <Button
             size="sm"
@@ -137,34 +245,60 @@ function CategoryCard({ category, setting, onUpdate, saving }) {
   );
 }
 
-export default function ModerationSettingsPage() {
-  const [settings, setSettings] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
-  const [testText, setTestText] = useState('');
-  const [testResult, setTestResult] = useState(null);
-  const [testing, setTesting] = useState(false);
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN PAGE COMPONENT
+// Moderation settings configuration page
+// ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Main moderation settings page component.
+ *
+ * Displays a grid of category configuration cards and a test panel
+ * for verifying moderation behavior. Settings are loaded from the
+ * server and saved individually per category.
+ *
+ * @returns {React.ReactElement} The moderation settings page
+ */
+export default function ModerationSettingsPage() {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STATE
+  // ─────────────────────────────────────────────────────────────────────────────
+  const [settings, setSettings] = useState([]);        // Array of category settings
+  const [loading, setLoading] = useState(true);        // Initial load in progress
+  const [saving, setSaving] = useState(false);         // Save operation in progress
+  const [testText, setTestText] = useState('');        // Text to test in test panel
+  const [testResult, setTestResult] = useState(null);  // Result from test API
+  const [testing, setTesting] = useState(false);       // Test operation in progress
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DATA LOADING
+  // Fetch settings from server on mount
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Load moderation settings from server.
+   * Merges server settings with defaults for all categories.
+   */
   const loadSettings = useCallback(async () => {
     try {
       setLoading(true);
       const response = await getModerationSettings();
 
-      // Create settings for all categories
+      // Create default settings for all known categories
       const allCategories = Object.keys(CATEGORY_INFO);
       const settingsMap = {};
 
-      // Default settings for each category
+      // Initialize with default values
       allCategories.forEach(cat => {
         settingsMap[cat] = {
           category: cat,
           enabled: true,
-          threshold: 0.7,
-          action: 'block'
+          threshold: 0.7,  // Default 70% threshold
+          action: 'block'  // Default to blocking
         };
       });
 
-      // Override with actual settings
+      // Override defaults with actual settings from server
       (response.settings || []).forEach(s => {
         settingsMap[s.category] = s;
       });
@@ -177,14 +311,26 @@ export default function ModerationSettingsPage() {
     }
   }, []);
 
+  // Load settings on component mount
   useEffect(() => {
     loadSettings();
   }, [loadSettings]);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // EVENT HANDLERS
+  // Handle category updates and moderation tests
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Update a single category's settings on the server.
+   * @param {string} category - Category ID to update
+   * @param {Object} data - New settings for the category
+   */
   const handleUpdate = async (category, data) => {
     setSaving(true);
     try {
       await updateModerationSetting(category, data);
+      // Reload all settings to ensure consistency
       loadSettings();
     } catch (err) {
       console.error('Failed to update setting:', err);
@@ -193,6 +339,10 @@ export default function ModerationSettingsPage() {
     }
   };
 
+  /**
+   * Test content against OpenAI Moderation API.
+   * Shows category scores and whether content would be flagged.
+   */
   const handleTest = async () => {
     if (!testText.trim()) return;
     setTesting(true);
@@ -206,6 +356,10 @@ export default function ModerationSettingsPage() {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOADING STATE
+  // Show spinner while fetching initial data
+  // ─────────────────────────────────────────────────────────────────────────────
   if (loading) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -214,8 +368,15 @@ export default function ModerationSettingsPage() {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
+      {/* ═══════════════════════════════════════════════════════════════════════
+          PAGE HEADER
+          Title and description
+          ═══════════════════════════════════════════════════════════════════════ */}
       <div>
         <h1 className="text-3xl font-bold tracking-tight">Moderation Settings</h1>
         <p className="text-muted-foreground">
@@ -223,7 +384,10 @@ export default function ModerationSettingsPage() {
         </p>
       </div>
 
-      {/* Test Panel */}
+      {/* ═══════════════════════════════════════════════════════════════════════
+          TEST PANEL
+          Test content against OpenAI Moderation API
+          ═══════════════════════════════════════════════════════════════════════ */}
       <Card>
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
@@ -235,6 +399,7 @@ export default function ModerationSettingsPage() {
           </CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {/* Test input and button */}
           <div className="flex gap-2">
             <Textarea
               placeholder="Enter text to test moderation..."
@@ -248,8 +413,13 @@ export default function ModerationSettingsPage() {
             </Button>
           </div>
 
+          {/* ─────────────────────────────────────────────────────────────────────
+              TEST RESULTS
+              Shows flagged status and per-category scores
+              ───────────────────────────────────────────────────────────────────── */}
           {testResult && (
             <div className="p-4 rounded-lg bg-muted/50 space-y-3">
+              {/* Overall result badge and flagged categories */}
               <div className="flex items-center gap-2">
                 <Badge variant={testResult.flagged ? 'destructive' : 'secondary'}>
                   {testResult.flagged ? 'Flagged' : 'Passed'}
@@ -261,6 +431,7 @@ export default function ModerationSettingsPage() {
                 )}
               </div>
 
+              {/* Per-category score breakdown */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-2">
                 {Object.entries(testResult.scores || {}).map(([category, score]) => (
                   <div
@@ -281,7 +452,10 @@ export default function ModerationSettingsPage() {
         </CardContent>
       </Card>
 
-      {/* Category Settings */}
+      {/* ═══════════════════════════════════════════════════════════════════════
+          CATEGORY SETTINGS GRID
+          One card per moderation category
+          ═══════════════════════════════════════════════════════════════════════ */}
       <div>
         <h2 className="text-lg font-semibold mb-4">Category Settings</h2>
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
@@ -297,7 +471,10 @@ export default function ModerationSettingsPage() {
         </div>
       </div>
 
-      {/* Info Card */}
+      {/* ═══════════════════════════════════════════════════════════════════════
+          INFO CARD
+          Explanation of how moderation works
+          ═══════════════════════════════════════════════════════════════════════ */}
       <Card className="bg-muted/50">
         <CardContent className="pt-6">
           <div className="flex gap-3">

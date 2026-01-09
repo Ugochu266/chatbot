@@ -1,3 +1,32 @@
+/**
+ * Knowledge Base Management Page
+ *
+ * This page provides CRUD operations for managing RAG (Retrieval Augmented Generation)
+ * knowledge base documents. Documents stored here are used to provide context-aware
+ * responses to user queries.
+ *
+ * Document Structure:
+ * - Title: Document identifier
+ * - Category: Grouping for organization (e.g., "Returns", "Shipping")
+ * - Content: The actual text content used for retrieval
+ * - Keywords: Tags for improved search matching
+ *
+ * Features:
+ * - Create, read, update, delete documents
+ * - Category-based filtering
+ * - Full-text search across titles and content
+ * - Client-side pagination
+ * - New category creation on-the-fly
+ *
+ * Data Flow:
+ * 1. Load documents from /api/admin/knowledge-base
+ * 2. Filter/search client-side for responsiveness
+ * 3. CRUD operations via modal dialogs
+ * 4. Confirmation dialog for deletions
+ *
+ * @module admin/pages/KnowledgeBasePage
+ */
+
 import React, { useState, useEffect, useCallback } from 'react';
 import {
   BookOpen,
@@ -48,7 +77,29 @@ import {
   deleteDocument
 } from '../../services/adminService';
 
+// ═══════════════════════════════════════════════════════════════════════════════
+// HELPER COMPONENTS
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Modal dialog for creating or editing knowledge base documents.
+ *
+ * Handles form state, validation, and submission for document CRUD operations.
+ * Supports both selecting existing categories and creating new ones.
+ *
+ * @param {Object} props - Component props
+ * @param {Object|null} props.document - Existing document to edit, or null for create
+ * @param {boolean} props.open - Whether dialog is open
+ * @param {Function} props.onClose - Close handler
+ * @param {Function} props.onSave - Save handler (receives form data)
+ * @param {string[]} props.categories - Available category options
+ * @returns {React.ReactElement} Document form dialog
+ */
 function DocumentDialog({ document, open, onClose, onSave, categories }) {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOCAL STATE
+  // Form fields and UI state
+  // ─────────────────────────────────────────────────────────────────────────────
   const [formData, setFormData] = useState({
     title: '',
     category: '',
@@ -56,10 +107,15 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
     keywords: ''
   });
   const [saving, setSaving] = useState(false);
-  const [newCategory, setNewCategory] = useState('');
+  const [newCategory, setNewCategory] = useState('');  // For creating new categories
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // FORM INITIALIZATION
+  // Populate form when document changes or dialog opens
+  // ─────────────────────────────────────────────────────────────────────────────
   useEffect(() => {
     if (document) {
+      // Editing existing document - populate form
       setFormData({
         title: document.title || '',
         category: document.category || '',
@@ -67,18 +123,25 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
         keywords: (document.keywords || []).join(', ')
       });
     } else {
+      // Creating new document - reset form
       setFormData({ title: '', category: '', content: '', keywords: '' });
     }
     setNewCategory('');
   }, [document, open]);
 
+  /**
+   * Handles form submission.
+   * Processes keywords string into array and calls onSave.
+   */
   const handleSubmit = async (e) => {
     e.preventDefault();
     setSaving(true);
     try {
       const data = {
         ...formData,
+        // Use new category if provided, otherwise use selected category
         category: newCategory || formData.category,
+        // Split comma-separated keywords into array
         keywords: formData.keywords.split(',').map(k => k.trim()).filter(k => k)
       };
       await onSave(data);
@@ -90,22 +153,33 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <Dialog open={open} onOpenChange={onClose}>
       <DialogContent className="max-w-2xl">
         <form onSubmit={handleSubmit}>
+          {/* ─────────────────────────────────────────────────────────────────
+              DIALOG HEADER
+              Dynamic title based on create/edit mode
+              ───────────────────────────────────────────────────────────────── */}
           <DialogHeader>
             <DialogTitle>
               {document ? 'Edit Document' : 'Add Document'}
             </DialogTitle>
             <DialogDescription>
-              {document 
-                ? 'Update the knowledge base document' 
+              {document
+                ? 'Update the knowledge base document'
                 : 'Add a new document to the knowledge base'}
             </DialogDescription>
           </DialogHeader>
 
+          {/* ─────────────────────────────────────────────────────────────────
+              FORM FIELDS
+              ───────────────────────────────────────────────────────────────── */}
           <div className="space-y-4 py-4">
+            {/* Title field */}
             <div className="space-y-2">
               <Label htmlFor="title">Title</Label>
               <Input
@@ -117,11 +191,13 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
               />
             </div>
 
+            {/* Category selection + new category input */}
             <div className="space-y-2">
               <Label>Category</Label>
               <div className="flex gap-2">
-                <Select 
-                  value={formData.category} 
+                {/* Existing category dropdown */}
+                <Select
+                  value={formData.category}
                   onValueChange={(val) => setFormData(d => ({ ...d, category: val }))}
                 >
                   <SelectTrigger className="flex-1">
@@ -133,6 +209,8 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
                     ))}
                   </SelectContent>
                 </Select>
+
+                {/* New category input */}
                 <Input
                   placeholder="Or new category"
                   value={newCategory}
@@ -142,6 +220,7 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
               </div>
             </div>
 
+            {/* Content textarea */}
             <div className="space-y-2">
               <Label htmlFor="content">Content</Label>
               <Textarea
@@ -154,6 +233,7 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
               />
             </div>
 
+            {/* Keywords input (comma-separated) */}
             <div className="space-y-2">
               <Label htmlFor="keywords">Keywords (comma-separated)</Label>
               <Input
@@ -165,6 +245,10 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
             </div>
           </div>
 
+          {/* ─────────────────────────────────────────────────────────────────
+              DIALOG FOOTER
+              Cancel and save buttons
+              ───────────────────────────────────────────────────────────────── */}
           <DialogFooter>
             <Button type="button" variant="outline" onClick={onClose}>
               Cancel
@@ -186,19 +270,42 @@ function DocumentDialog({ document, open, onClose, onSave, categories }) {
   );
 }
 
-export default function KnowledgeBasePage() {
-  const [documents, setDocuments] = useState([]);
-  const [categories, setCategories] = useState([]);
-  const [loading, setLoading] = useState(true);
-  const [selectedCategory, setSelectedCategory] = useState(null);
-  const [searchQuery, setSearchQuery] = useState('');
-  const [editingDoc, setEditingDoc] = useState(null);
-  const [dialogOpen, setDialogOpen] = useState(false);
-  const [deleteDoc, setDeleteDoc] = useState(null);
-  const [deleting, setDeleting] = useState(false);
-  const [page, setPage] = useState(1);
-  const limit = 10;
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
 
+/**
+ * Main knowledge base management page component.
+ *
+ * Provides a complete interface for managing RAG documents including
+ * listing, searching, filtering, and CRUD operations.
+ *
+ * @returns {React.ReactElement} Knowledge base page UI
+ */
+export default function KnowledgeBasePage() {
+  // ─────────────────────────────────────────────────────────────────────────────
+  // STATE
+  // ─────────────────────────────────────────────────────────────────────────────
+  const [documents, setDocuments] = useState([]);        // All documents
+  const [categories, setCategories] = useState([]);      // Available categories
+  const [loading, setLoading] = useState(true);          // Initial loading state
+  const [selectedCategory, setSelectedCategory] = useState(null);  // Category filter
+  const [searchQuery, setSearchQuery] = useState('');    // Search filter
+  const [editingDoc, setEditingDoc] = useState(null);    // Document being edited
+  const [dialogOpen, setDialogOpen] = useState(false);   // Create/edit dialog state
+  const [deleteDoc, setDeleteDoc] = useState(null);      // Document pending deletion
+  const [deleting, setDeleting] = useState(false);       // Delete in progress
+  const [page, setPage] = useState(1);                   // Current page number
+  const limit = 10;  // Items per page
+
+  // ─────────────────────────────────────────────────────────────────────────────
+  // DATA LOADING
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Loads documents from API, optionally filtered by category.
+   * Memoized with useCallback to prevent unnecessary re-fetches.
+   */
   const loadDocuments = useCallback(async () => {
     try {
       setLoading(true);
@@ -212,26 +319,41 @@ export default function KnowledgeBasePage() {
     }
   }, [selectedCategory]);
 
+  // Reload documents when category filter changes
   useEffect(() => {
     loadDocuments();
   }, [loadDocuments]);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CRUD HANDLERS
+  // ─────────────────────────────────────────────────────────────────────────────
+
+  /**
+   * Saves a document (create or update).
+   * Called by DocumentDialog on form submission.
+   */
   const handleSave = async (data) => {
     if (editingDoc) {
+      // Update existing document
       await updateDocument(editingDoc.id, data);
     } else {
+      // Create new document
       await createDocument(data);
     }
-    loadDocuments();
+    loadDocuments();  // Refresh list
   };
 
+  /**
+   * Deletes the document pending in deleteDoc state.
+   * Called when user confirms deletion dialog.
+   */
   const handleDelete = async () => {
     if (!deleteDoc) return;
     setDeleting(true);
     try {
       await deleteDocument(deleteDoc.id);
       setDeleteDoc(null);
-      loadDocuments();
+      loadDocuments();  // Refresh list
     } catch (err) {
       console.error('Failed to delete document:', err);
     } finally {
@@ -239,21 +361,32 @@ export default function KnowledgeBasePage() {
     }
   };
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // CLIENT-SIDE FILTERING
+  // Filter documents by search query (title and content)
+  // ─────────────────────────────────────────────────────────────────────────────
   const filteredDocs = documents.filter(doc =>
     searchQuery === '' ||
     doc.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
     doc.content.toLowerCase().includes(searchQuery.toLowerCase())
   );
 
-  // Pagination
+  // ─────────────────────────────────────────────────────────────────────────────
+  // PAGINATION
+  // Calculate pages and slice filtered results
+  // ─────────────────────────────────────────────────────────────────────────────
   const totalPages = Math.ceil(filteredDocs.length / limit);
   const paginatedDocs = filteredDocs.slice((page - 1) * limit, page * limit);
 
-  // Reset to page 1 when search/filter changes
+  // Reset to page 1 when filters change
   useEffect(() => {
     setPage(1);
   }, [searchQuery, selectedCategory]);
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // GROUP BY CATEGORY
+  // Organize paginated documents by category for display
+  // ─────────────────────────────────────────────────────────────────────────────
   const groupedDocs = paginatedDocs.reduce((acc, doc) => {
     const cat = doc.category || 'Uncategorized';
     if (!acc[cat]) acc[cat] = [];
@@ -261,6 +394,9 @@ export default function KnowledgeBasePage() {
     return acc;
   }, {});
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // LOADING STATE
+  // ─────────────────────────────────────────────────────────────────────────────
   if (loading && documents.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -269,8 +405,15 @@ export default function KnowledgeBasePage() {
     );
   }
 
+  // ─────────────────────────────────────────────────────────────────────────────
+  // RENDER
+  // ─────────────────────────────────────────────────────────────────────────────
   return (
     <div className="space-y-6">
+      {/* ═══════════════════════════════════════════════════════════════════════
+          PAGE HEADER
+          Title and add document button
+          ═══════════════════════════════════════════════════════════════════════ */}
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-3xl font-bold tracking-tight">Knowledge Base</h1>
@@ -284,7 +427,11 @@ export default function KnowledgeBasePage() {
         </Button>
       </div>
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          SEARCH AND FILTER BAR
+          ═══════════════════════════════════════════════════════════════════════ */}
       <div className="flex gap-4">
+        {/* Search input with icon */}
         <div className="relative flex-1">
           <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-muted-foreground" />
           <Input
@@ -294,8 +441,10 @@ export default function KnowledgeBasePage() {
             className="pl-10"
           />
         </div>
-        <Select 
-          value={selectedCategory || 'all'} 
+
+        {/* Category filter dropdown */}
+        <Select
+          value={selectedCategory || 'all'}
           onValueChange={(val) => setSelectedCategory(val === 'all' ? null : val)}
         >
           <SelectTrigger className="w-[200px]">
@@ -310,7 +459,14 @@ export default function KnowledgeBasePage() {
         </Select>
       </div>
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          DOCUMENT LIST
+          ═══════════════════════════════════════════════════════════════════════ */}
       {documents.length === 0 ? (
+        /* ─────────────────────────────────────────────────────────────────────
+           EMPTY STATE
+           No documents in knowledge base yet
+           ───────────────────────────────────────────────────────────────────── */
         <Card>
           <CardContent className="flex flex-col items-center justify-center py-12">
             <BookOpen className="h-12 w-12 text-muted-foreground mb-4" />
@@ -326,6 +482,10 @@ export default function KnowledgeBasePage() {
         </Card>
       ) : (
         <div className="space-y-6">
+          {/* ─────────────────────────────────────────────────────────────────
+              DOCUMENTS GROUPED BY CATEGORY
+              Each category gets its own card
+              ───────────────────────────────────────────────────────────────── */}
           {Object.entries(groupedDocs).map(([category, docs]) => (
             <Card key={category}>
               <CardHeader>
@@ -342,11 +502,13 @@ export default function KnowledgeBasePage() {
                       key={doc.id}
                       className="flex items-start justify-between p-4 rounded-lg border bg-card hover:bg-muted/50 transition-colors"
                     >
+                      {/* Document info */}
                       <div className="flex-1 min-w-0">
                         <h4 className="font-medium">{doc.title}</h4>
                         <p className="text-sm text-muted-foreground line-clamp-2 mt-1">
                           {doc.content}
                         </p>
+                        {/* Keyword badges */}
                         {doc.keywords && doc.keywords.length > 0 && (
                           <div className="flex flex-wrap gap-1 mt-2">
                             {doc.keywords.slice(0, 5).map((kw, i) => (
@@ -362,6 +524,8 @@ export default function KnowledgeBasePage() {
                           </div>
                         )}
                       </div>
+
+                      {/* Action buttons */}
                       <div className="flex gap-1 ml-4">
                         <Button
                           variant="ghost"
@@ -385,7 +549,9 @@ export default function KnowledgeBasePage() {
             </Card>
           ))}
 
-          {/* Pagination */}
+          {/* ─────────────────────────────────────────────────────────────────
+              PAGINATION CONTROLS
+              ───────────────────────────────────────────────────────────────── */}
           {totalPages > 1 && (
             <div className="flex items-center justify-between pt-4 border-t">
               <p className="text-sm text-muted-foreground">
@@ -417,6 +583,9 @@ export default function KnowledgeBasePage() {
         </div>
       )}
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          CREATE/EDIT DOCUMENT DIALOG
+          ═══════════════════════════════════════════════════════════════════════ */}
       <DocumentDialog
         document={editingDoc}
         open={dialogOpen}
@@ -425,6 +594,9 @@ export default function KnowledgeBasePage() {
         categories={categories}
       />
 
+      {/* ═══════════════════════════════════════════════════════════════════════
+          DELETE CONFIRMATION DIALOG
+          ═══════════════════════════════════════════════════════════════════════ */}
       <AlertDialog open={!!deleteDoc} onOpenChange={() => setDeleteDoc(null)}>
         <AlertDialogContent>
           <AlertDialogHeader>

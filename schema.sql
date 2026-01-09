@@ -1,5 +1,5 @@
 -- SafeChat Database Schema
--- Run this in Neon SQL Editor: https://console.neon.tech
+-- Neon SQL Editor: https://console.neon.tech
 
 -- Enable UUID extension
 CREATE EXTENSION IF NOT EXISTS "pgcrypto";
