@@ -38,7 +38,8 @@ import {
   ChevronLeft,
   FileCode,
   Settings,
-  Sliders
+  Sliders,
+  Package
 } from 'lucide-react';
 import { cn } from '../../lib/utils';
 import { Button } from '../../components/ui/button';
@@ -75,6 +76,11 @@ const navItems = [
     title: 'Knowledge Base',
     href: '/admin/knowledge-base',
     icon: BookOpen,
+  },
+  {
+    title: 'Spare Parts',
+    href: '/admin/spare-parts',
+    icon: Package,
   },
   {
     title: 'Safety Rules',

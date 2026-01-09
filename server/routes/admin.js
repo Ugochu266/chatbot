@@ -30,6 +30,22 @@ import {
   getAllCategories,
   getDocumentsByCategory
 } from '../db/knowledgeBase.js';
+import {
+  initSparePartsTable,
+  searchSpareParts,
+  searchByVehicle,
+  getAllSpareParts,
+  getSparePartById,
+  getSparePartByNumber,
+  addSparePart,
+  updateSparePart,
+  deleteSparePart,
+  bulkImportSpareParts,
+  getAllCategories as getPartCategories,
+  getAllMakes,
+  getModelsByMake,
+  getSparePartsCount
+} from '../db/spareParts.js';
 import { validatePagination, validateConversationId } from '../middleware/validator.js';
 import { AppError } from '../middleware/errorHandler.js';
 import sql from '../db/index.js';
@@ -690,6 +706,420 @@ router.post('/knowledge-base/bulk-import', adminCheck, async (req, res, next) =>
       failed,
       errors: errors.slice(0, 10), // Return first 10 errors only
       message: `Imported ${imported} of ${documents.length} documents`
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// SPARE PARTS CATALOG ROUTES
+// CRUD operations for vehicle spare parts with exact CSV schema
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Initialize spare parts table on first request.
+ * This ensures the table exists before any operations.
+ */
+let sparePartsTableInitialized = false;
+async function ensureSparePartsTable() {
+  if (!sparePartsTableInitialized) {
+    await initSparePartsTable();
+    sparePartsTableInitialized = true;
+  }
+}
+
+/**
+ * GET /api/admin/spare-parts
+ *
+ * List all spare parts in the catalog with optional filtering.
+ *
+ * Query Parameters:
+ * - category {string} - Filter by part category (optional)
+ * - make {string} - Filter by vehicle make (optional)
+ * - stockStatus {string} - Filter by stock status (optional)
+ *
+ * Response:
+ * - parts: Array of spare part objects
+ * - categories: List of all available categories
+ * - makes: List of all available vehicle makes
+ * - total: Total count of parts (with filters applied)
+ */
+router.get('/spare-parts', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+
+    const { category, make, stockStatus } = req.query;
+    const filters = {};
+    if (category) filters.category = category;
+    if (make) filters.make = make;
+    if (stockStatus) filters.stockStatus = stockStatus;
+
+    const parts = await getAllSpareParts(filters);
+    const categories = await getPartCategories();
+    const makes = await getAllMakes();
+
+    res.json({
+      success: true,
+      parts: parts.map(part => ({
+        id: part.id,
+        vehicleMake: part.vehicle_make,
+        vehicleModel: part.vehicle_model,
+        yearFrom: part.year_from,
+        yearTo: part.year_to,
+        partNumber: part.part_number,
+        partCategory: part.part_category,
+        partDescription: part.part_description,
+        priceGbp: parseFloat(part.price_gbp),
+        priceUsd: parseFloat(part.price_usd),
+        stockStatus: part.stock_status,
+        compatibilityNotes: part.compatibility_notes,
+        createdAt: part.created_at,
+        updatedAt: part.updated_at
+      })),
+      categories,
+      makes,
+      total: parts.length
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/admin/spare-parts/models/:make
+ *
+ * Get all models available for a specific vehicle make.
+ *
+ * Path Parameters:
+ * - make {string} - Vehicle manufacturer
+ *
+ * Response:
+ * - models: Array of model names
+ */
+router.get('/spare-parts/models/:make', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+    const models = await getModelsByMake(req.params.make);
+
+    res.json({
+      success: true,
+      models
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * GET /api/admin/spare-parts/:id
+ *
+ * Get a single spare part by ID.
+ *
+ * Path Parameters:
+ * - id {number} - Spare part ID
+ *
+ * Response:
+ * - part: Full spare part object
+ *
+ * Errors:
+ * - 404: Spare part not found
+ */
+router.get('/spare-parts/:id', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+    const part = await getSparePartById(parseInt(req.params.id));
+
+    if (!part) {
+      throw new AppError('Spare part not found', 404, 'NOT_FOUND');
+    }
+
+    res.json({
+      success: true,
+      part: {
+        id: part.id,
+        vehicleMake: part.vehicle_make,
+        vehicleModel: part.vehicle_model,
+        yearFrom: part.year_from,
+        yearTo: part.year_to,
+        partNumber: part.part_number,
+        partCategory: part.part_category,
+        partDescription: part.part_description,
+        priceGbp: parseFloat(part.price_gbp),
+        priceUsd: parseFloat(part.price_usd),
+        stockStatus: part.stock_status,
+        compatibilityNotes: part.compatibility_notes,
+        createdAt: part.created_at,
+        updatedAt: part.updated_at
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/spare-parts
+ *
+ * Create a new spare part in the catalog.
+ *
+ * Request Body (exact CSV format):
+ * - vehicle_make {string} - Vehicle manufacturer (required)
+ * - vehicle_model {string} - Vehicle model (required)
+ * - year_from {number} - Start year (required)
+ * - year_to {number} - End year (required)
+ * - part_number {string} - Unique part identifier (required)
+ * - part_category {string} - Part category (required)
+ * - part_description {string} - Description (required)
+ * - price_gbp {number} - Price in GBP (required)
+ * - price_usd {number} - Price in USD (required)
+ * - stock_status {string} - Stock status (optional, default: 'In Stock')
+ * - compatibility_notes {string} - Notes (optional)
+ *
+ * Response:
+ * - part: The created spare part
+ */
+router.post('/spare-parts', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+
+    const {
+      vehicle_make, vehicle_model, year_from, year_to,
+      part_number, part_category, part_description,
+      price_gbp, price_usd, stock_status, compatibility_notes
+    } = req.body;
+
+    // Validate required fields
+    if (!vehicle_make || !vehicle_model || !year_from || !year_to ||
+        !part_number || !part_category || !part_description ||
+        price_gbp === undefined || price_usd === undefined) {
+      throw new AppError('All required fields must be provided', 400, 'VALIDATION_ERROR');
+    }
+
+    const part = await addSparePart({
+      vehicle_make, vehicle_model, year_from, year_to,
+      part_number, part_category, part_description,
+      price_gbp, price_usd, stock_status, compatibility_notes
+    });
+
+    res.status(201).json({
+      success: true,
+      part: {
+        id: part.id,
+        vehicleMake: part.vehicle_make,
+        vehicleModel: part.vehicle_model,
+        yearFrom: part.year_from,
+        yearTo: part.year_to,
+        partNumber: part.part_number,
+        partCategory: part.part_category,
+        partDescription: part.part_description,
+        priceGbp: parseFloat(part.price_gbp),
+        priceUsd: parseFloat(part.price_usd),
+        stockStatus: part.stock_status,
+        compatibilityNotes: part.compatibility_notes,
+        createdAt: part.created_at,
+        updatedAt: part.updated_at
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * PUT /api/admin/spare-parts/:id
+ *
+ * Update an existing spare part.
+ *
+ * Path Parameters:
+ * - id {number} - Spare part ID
+ *
+ * Request Body: Same as POST (all fields required)
+ *
+ * Response:
+ * - part: The updated spare part
+ *
+ * Errors:
+ * - 404: Spare part not found
+ */
+router.put('/spare-parts/:id', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+
+    const existing = await getSparePartById(parseInt(req.params.id));
+    if (!existing) {
+      throw new AppError('Spare part not found', 404, 'NOT_FOUND');
+    }
+
+    const {
+      vehicle_make, vehicle_model, year_from, year_to,
+      part_number, part_category, part_description,
+      price_gbp, price_usd, stock_status, compatibility_notes
+    } = req.body;
+
+    // Validate required fields
+    if (!vehicle_make || !vehicle_model || !year_from || !year_to ||
+        !part_number || !part_category || !part_description ||
+        price_gbp === undefined || price_usd === undefined) {
+      throw new AppError('All required fields must be provided', 400, 'VALIDATION_ERROR');
+    }
+
+    const part = await updateSparePart(parseInt(req.params.id), {
+      vehicle_make, vehicle_model, year_from, year_to,
+      part_number, part_category, part_description,
+      price_gbp, price_usd, stock_status, compatibility_notes
+    });
+
+    res.json({
+      success: true,
+      part: {
+        id: part.id,
+        vehicleMake: part.vehicle_make,
+        vehicleModel: part.vehicle_model,
+        yearFrom: part.year_from,
+        yearTo: part.year_to,
+        partNumber: part.part_number,
+        partCategory: part.part_category,
+        partDescription: part.part_description,
+        priceGbp: parseFloat(part.price_gbp),
+        priceUsd: parseFloat(part.price_usd),
+        stockStatus: part.stock_status,
+        compatibilityNotes: part.compatibility_notes,
+        createdAt: part.created_at,
+        updatedAt: part.updated_at
+      }
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * DELETE /api/admin/spare-parts/:id
+ *
+ * Delete a spare part from the catalog.
+ *
+ * Path Parameters:
+ * - id {number} - Spare part ID
+ *
+ * Response:
+ * - message: Success confirmation
+ *
+ * Errors:
+ * - 404: Spare part not found
+ */
+router.delete('/spare-parts/:id', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+
+    const existing = await getSparePartById(parseInt(req.params.id));
+    if (!existing) {
+      throw new AppError('Spare part not found', 404, 'NOT_FOUND');
+    }
+
+    await deleteSparePart(parseInt(req.params.id));
+
+    res.json({
+      success: true,
+      message: 'Spare part deleted successfully'
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/spare-parts/search
+ *
+ * Search spare parts using the RAG algorithm.
+ * Useful for testing how parts will be found during conversations.
+ *
+ * Request Body:
+ * - query {string} - Search query (required)
+ * - limit {number} - Max results (default: 5)
+ *
+ * Response:
+ * - parts: Array of matching spare parts with relevance scores
+ */
+router.post('/spare-parts/search', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+
+    const { query, limit = 5 } = req.body;
+
+    if (!query) {
+      throw new AppError('Search query is required', 400, 'VALIDATION_ERROR');
+    }
+
+    const parts = await searchSpareParts(query, limit);
+
+    res.json({
+      success: true,
+      parts: parts.map(part => ({
+        id: part.id,
+        vehicleMake: part.vehicle_make,
+        vehicleModel: part.vehicle_model,
+        yearFrom: part.year_from,
+        yearTo: part.year_to,
+        partNumber: part.part_number,
+        partCategory: part.part_category,
+        partDescription: part.part_description,
+        priceGbp: parseFloat(part.price_gbp),
+        priceUsd: parseFloat(part.price_usd),
+        stockStatus: part.stock_status,
+        compatibilityNotes: part.compatibility_notes,
+        relevanceScore: part.relevance_score
+      }))
+    });
+  } catch (error) {
+    next(error);
+  }
+});
+
+/**
+ * POST /api/admin/spare-parts/bulk-import
+ *
+ * Bulk import spare parts from CSV data.
+ * Accepts array of objects matching exact CSV column format.
+ * Updates existing parts if part_number already exists.
+ *
+ * Request Body:
+ * - parts {Array} - Array of spare part objects with CSV columns:
+ *   - vehicle_make, vehicle_model, year_from, year_to
+ *   - part_number, part_category, part_description
+ *   - price_gbp, price_usd, stock_status, compatibility_notes
+ *
+ * Response:
+ * - imported: Number of new parts imported
+ * - updated: Number of existing parts updated
+ * - failed: Number of parts that failed
+ * - errors: Array of error details (first 10)
+ */
+router.post('/spare-parts/bulk-import', adminCheck, async (req, res, next) => {
+  try {
+    await ensureSparePartsTable();
+
+    const { parts } = req.body;
+
+    // Validate input
+    if (!parts || !Array.isArray(parts) || parts.length === 0) {
+      throw new AppError('Parts array is required', 400, 'VALIDATION_ERROR');
+    }
+
+    // Limit bulk import size
+    if (parts.length > 1000) {
+      throw new AppError('Maximum 1000 parts per import', 400, 'VALIDATION_ERROR');
+    }
+
+    const result = await bulkImportSpareParts(parts);
+
+    res.status(result.imported > 0 || result.updated > 0 ? 201 : 400).json({
+      success: result.imported > 0 || result.updated > 0,
+      imported: result.imported,
+      updated: result.updated,
+      failed: result.failed,
+      errors: result.errors.slice(0, 10),
+      message: `Imported ${result.imported} new, updated ${result.updated} existing, ${result.failed} failed`
     });
   } catch (error) {
     next(error);

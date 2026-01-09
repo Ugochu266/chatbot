@@ -148,12 +148,15 @@ app.use(cors({
  * as req.body in route handlers.
  *
  * Security Configuration:
- * - limit: '10kb' - Prevents large payload attacks
+ * - Default limit: '10kb' - Prevents large payload attacks
  *   This is sufficient for chat messages while blocking abuse attempts.
- *
- * Note: If you need to accept larger payloads (e.g., file uploads),
- * consider using a separate route with a higher limit.
+ * - Bulk import routes use a higher limit (10MB) for CSV/JSON file uploads
  */
+
+// Higher limit for bulk import endpoints (spare parts data can be large)
+app.use('/api/admin/spare-parts/bulk-import', express.json({ limit: '10mb' }));
+
+// Default limit for all other routes
 app.use(express.json({ limit: '10kb' }));
 
 // ═══════════════════════════════════════════════════════════════════════════════

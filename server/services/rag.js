@@ -22,7 +22,11 @@
  */
 
 import { searchDocuments } from '../db/knowledgeBase.js';
+import { searchSpareParts, initSparePartsTable } from '../db/spareParts.js';
 import { logger } from '../middleware/errorHandler.js';
+
+// Track if spare parts table has been initialized
+let sparePartsInitialized = false;
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CONTEXT RETRIEVAL
@@ -65,38 +69,60 @@ import { logger } from '../middleware/errorHandler.js';
 export async function retrieveContext(query, limit = 3) {
   try {
     // ─────────────────────────────────────────────────────────────────────────────
-    // DOCUMENT SEARCH
-    // Search the knowledge base using semantic similarity matching.
-    // The searchDocuments function handles the vector similarity search.
+    // ENSURE SPARE PARTS TABLE EXISTS
+    // Initialize the table on first call to avoid errors
     // ─────────────────────────────────────────────────────────────────────────────
-    const documents = await searchDocuments(query, limit);
+    if (!sparePartsInitialized) {
+      try {
+        await initSparePartsTable();
+        sparePartsInitialized = true;
+      } catch (err) {
+        logger.warn({ message: 'Failed to initialize spare parts table', error: err.message });
+      }
+    }
 
-    // No relevant documents found - return empty context
-    // This is a normal case, not an error (e.g., off-topic questions)
-    if (documents.length === 0) {
+    // ─────────────────────────────────────────────────────────────────────────────
+    // PARALLEL SEARCH: KNOWLEDGE BASE + SPARE PARTS
+    // Search both data sources simultaneously for better coverage.
+    // ─────────────────────────────────────────────────────────────────────────────
+    const [documents, spareParts] = await Promise.all([
+      searchDocuments(query, limit).catch(() => []),
+      searchSpareParts(query, limit).catch(() => [])
+    ]);
+
+    // No relevant content found in either source
+    if (documents.length === 0 && spareParts.length === 0) {
       return {
         hasContext: false,
         documents: [],
+        spareParts: [],
         contextText: null
       };
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
     // FORMAT CONTEXT FOR PROMPT
-    // Convert raw documents into a structured format for the AI prompt.
-    // This includes clear delimiters and instructions for the AI.
+    // Combine both documents and spare parts into a structured format.
     // ─────────────────────────────────────────────────────────────────────────────
-    const contextText = formatContextForPrompt(documents);
+    const contextText = formatCombinedContextForPrompt(documents, spareParts);
 
     return {
       hasContext: true,
-      // Return document metadata (without full content) for logging/display
-      // The full content is included in contextText for the AI
+      // Return document metadata for logging
       documents: documents.map(d => ({
         id: d.id,
         title: d.title,
         category: d.category,
-        relevanceScore: d.relevance_score  // How well document matched the query
+        relevanceScore: d.relevance_score
+      })),
+      // Return spare parts metadata
+      spareParts: spareParts.map(p => ({
+        id: p.id,
+        partNumber: p.part_number,
+        partDescription: p.part_description,
+        vehicleMake: p.vehicle_make,
+        vehicleModel: p.vehicle_model,
+        relevanceScore: p.relevance_score
       })),
       contextText
     };
@@ -116,6 +142,7 @@ export async function retrieveContext(query, limit = 3) {
     return {
       hasContext: false,
       documents: [],
+      spareParts: [],
       contextText: null,
       error: error.message  // Include error for debugging
     };
@@ -172,6 +199,80 @@ ${contextParts.join('\n\n---\n\n')}
 END OF DOCUMENTATION
 
 Please use the above documentation to help answer the user's question. If the documentation doesn't contain relevant information, acknowledge that you don't have specific information about their query and offer to help in other ways.
+`.trim();
+}
+
+/**
+ * Format spare parts data into a structured context block for the AI prompt.
+ *
+ * Creates a detailed listing of spare parts including:
+ * - Part number (for ordering/reference)
+ * - Description
+ * - Vehicle compatibility (make, model, years)
+ * - Pricing (GBP and USD)
+ * - Stock status
+ * - Compatibility notes
+ *
+ * @param {Array<Object>} parts - Array of spare part objects from the database
+ * @returns {string|null} Formatted parts context, or null if no parts
+ * @private
+ */
+function formatSparePartsForPrompt(parts) {
+  if (parts.length === 0) return null;
+
+  const partsList = parts.map((part, index) => {
+    return `[Part ${index + 1}: ${part.part_number}]
+Description: ${part.part_description}
+Vehicle: ${part.vehicle_make} ${part.vehicle_model} (${part.year_from}-${part.year_to})
+Price: £${parseFloat(part.price_gbp).toFixed(2)} GBP / $${parseFloat(part.price_usd).toFixed(2)} USD
+Stock Status: ${part.stock_status}
+${part.compatibility_notes ? `Notes: ${part.compatibility_notes}` : ''}`.trim();
+  });
+
+  return partsList.join('\n\n');
+}
+
+/**
+ * Format combined knowledge base documents and spare parts for the AI prompt.
+ *
+ * This function creates a comprehensive context block that includes:
+ * - General documentation from the knowledge base
+ * - Specific spare parts information from the catalog
+ *
+ * @param {Array<Object>} documents - Knowledge base documents
+ * @param {Array<Object>} spareParts - Spare parts from the catalog
+ * @returns {string|null} Combined formatted context, or null if both empty
+ * @private
+ */
+function formatCombinedContextForPrompt(documents, spareParts) {
+  const sections = [];
+
+  // Add knowledge base documents section
+  if (documents.length > 0) {
+    const docParts = documents.map((doc, index) => {
+      return `[Document ${index + 1}: ${doc.title}]\n${doc.content}`;
+    });
+    sections.push(`GENERAL DOCUMENTATION:\n${docParts.join('\n\n---\n\n')}`);
+  }
+
+  // Add spare parts section
+  if (spareParts.length > 0) {
+    const partsText = formatSparePartsForPrompt(spareParts);
+    sections.push(`SPARE PARTS CATALOG:\n${partsText}`);
+  }
+
+  if (sections.length === 0) return null;
+
+  return `
+${sections.join('\n\n════════════════════════════════════════════════════════════════════════════════\n\n')}
+
+END OF REFERENCE DATA
+
+Instructions for responding:
+- For spare parts inquiries: Provide the part number, price, and compatibility information from the catalog above.
+- Always mention stock status when discussing spare parts.
+- If asked about a part not in the catalog, acknowledge that and suggest the user contact support for availability.
+- Use the documentation and spare parts data to provide accurate, helpful responses.
 `.trim();
 }
 

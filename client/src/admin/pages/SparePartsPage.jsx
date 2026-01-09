@@ -1,0 +1,892 @@
+/**
+ * Spare Parts Management Page
+ *
+ * This page allows admins to manage the vehicle spare parts catalog.
+ * The spare parts data is used for RAG (Retrieval-Augmented Generation)
+ * when users ask about parts, pricing, availability, etc.
+ *
+ * Features:
+ * - View all spare parts with filtering by category/make
+ * - Add/edit/delete individual parts
+ * - Bulk import from CSV files
+ * - Search parts using RAG algorithm
+ *
+ * CSV Format (exact columns required):
+ * vehicle_make, vehicle_model, year_from, year_to, part_number,
+ * part_category, part_description, price_gbp, price_usd,
+ * stock_status, compatibility_notes
+ *
+ * @module admin/pages/SparePartsPage
+ */
+
+import React, { useState, useEffect, useCallback, useRef } from 'react';
+import {
+  Package,
+  Plus,
+  Pencil,
+  Trash2,
+  Upload,
+  Search,
+  Loader2,
+  FileText,
+  AlertCircle,
+  CheckCircle2,
+  Car,
+  DollarSign
+} from 'lucide-react';
+import { Button } from '../../components/ui/button';
+import { Input } from '../../components/ui/input';
+import { Label } from '../../components/ui/label';
+import { Textarea } from '../../components/ui/textarea';
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '../../components/ui/card';
+import { Badge } from '../../components/ui/badge';
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from '../../components/ui/table';
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from '../../components/ui/dialog';
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from '../../components/ui/select';
+import {
+  Alert,
+  AlertDescription,
+  AlertTitle,
+} from '../../components/ui/alert';
+import {
+  getSpareParts,
+  createSparePart,
+  updateSparePart,
+  deleteSparePart,
+  searchSpareParts,
+  bulkImportSpareParts
+} from '../../services/adminService';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CSV PARSING UTILITIES
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Parse a single CSV line handling quoted values with commas.
+ */
+function parseCSVLine(line) {
+  const result = [];
+  let current = '';
+  let inQuotes = false;
+
+  for (let i = 0; i < line.length; i++) {
+    const char = line[i];
+
+    if (char === '"') {
+      if (inQuotes && line[i + 1] === '"') {
+        current += '"';
+        i++;
+      } else {
+        inQuotes = !inQuotes;
+      }
+    } else if (char === ',' && !inQuotes) {
+      result.push(current.trim());
+      current = '';
+    } else {
+      current += char;
+    }
+  }
+  result.push(current.trim());
+
+  return result;
+}
+
+/**
+ * Parse CSV content into array of spare part objects.
+ * Expects exact CSV column format.
+ */
+function parseCSV(content) {
+  const lines = content.split('\n').filter(line => line.trim());
+  if (lines.length < 2) {
+    throw new Error('CSV must have a header row and at least one data row');
+  }
+
+  const headers = parseCSVLine(lines[0]).map(h => h.toLowerCase().trim());
+
+  // Validate required columns
+  const requiredColumns = [
+    'vehicle_make', 'vehicle_model', 'year_from', 'year_to',
+    'part_number', 'part_category', 'part_description',
+    'price_gbp', 'price_usd'
+  ];
+
+  const missingColumns = requiredColumns.filter(col => !headers.includes(col));
+  if (missingColumns.length > 0) {
+    throw new Error(`Missing required columns: ${missingColumns.join(', ')}`);
+  }
+
+  const parts = [];
+
+  for (let i = 1; i < lines.length; i++) {
+    const values = parseCSVLine(lines[i]);
+    if (values.length !== headers.length) continue;
+
+    const part = {};
+    headers.forEach((header, index) => {
+      let value = values[index];
+
+      // Convert numeric fields
+      if (header === 'year_from' || header === 'year_to') {
+        value = parseInt(value) || 0;
+      } else if (header === 'price_gbp' || header === 'price_usd') {
+        value = parseFloat(value) || 0;
+      }
+
+      part[header] = value;
+    });
+
+    parts.push(part);
+  }
+
+  return parts;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// IMPORT DIALOG COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function ImportDialog({ open, onClose, onImport }) {
+  const [file, setFile] = useState(null);
+  const [preview, setPreview] = useState([]);
+  const [error, setError] = useState('');
+  const [importing, setImporting] = useState(false);
+  const [result, setResult] = useState(null);
+  const fileInputRef = useRef(null);
+
+  const handleFileChange = (e) => {
+    const selectedFile = e.target.files[0];
+    setFile(selectedFile);
+    setError('');
+    setResult(null);
+    setPreview([]);
+
+    if (selectedFile) {
+      const reader = new FileReader();
+      reader.onload = (event) => {
+        try {
+          const parts = parseCSV(event.target.result);
+          setPreview(parts.slice(0, 5));
+        } catch (err) {
+          setError(err.message);
+        }
+      };
+      reader.readAsText(selectedFile);
+    }
+  };
+
+  const handleImport = async () => {
+    if (!file) return;
+
+    setImporting(true);
+    setError('');
+
+    try {
+      const reader = new FileReader();
+      reader.onload = async (event) => {
+        try {
+          const parts = parseCSV(event.target.result);
+          const importResult = await bulkImportSpareParts(parts);
+          setResult(importResult);
+          if (importResult.imported > 0 || importResult.updated > 0) {
+            onImport();
+          }
+        } catch (err) {
+          setError(err.message || 'Import failed');
+        } finally {
+          setImporting(false);
+        }
+      };
+      reader.readAsText(file);
+    } catch (err) {
+      setError(err.message);
+      setImporting(false);
+    }
+  };
+
+  const handleClose = () => {
+    setFile(null);
+    setPreview([]);
+    setError('');
+    setResult(null);
+    onClose();
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={handleClose}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Upload className="h-5 w-5" />
+            Import Spare Parts from CSV
+          </DialogTitle>
+          <DialogDescription>
+            Upload a CSV file with the exact column format
+          </DialogDescription>
+        </DialogHeader>
+
+        <div className="space-y-4">
+          {/* Format Info */}
+          <Alert>
+            <FileText className="h-4 w-4" />
+            <AlertTitle>Required CSV Format</AlertTitle>
+            <AlertDescription className="text-xs mt-2 font-mono">
+              vehicle_make, vehicle_model, year_from, year_to, part_number,
+              part_category, part_description, price_gbp, price_usd,
+              stock_status, compatibility_notes
+            </AlertDescription>
+          </Alert>
+
+          {/* File Input */}
+          <div
+            className="border-2 border-dashed rounded-lg p-8 text-center cursor-pointer hover:border-primary transition-colors"
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept=".csv"
+              onChange={handleFileChange}
+              className="hidden"
+            />
+            {file ? (
+              <div className="flex items-center justify-center gap-2">
+                <FileText className="h-6 w-6 text-primary" />
+                <span className="font-medium">{file.name}</span>
+                <Badge variant="secondary">{preview.length}+ parts</Badge>
+              </div>
+            ) : (
+              <div className="text-muted-foreground">
+                <Upload className="h-8 w-8 mx-auto mb-2" />
+                <p>Click to select CSV file or drag and drop</p>
+              </div>
+            )}
+          </div>
+
+          {/* Error */}
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          {/* Preview */}
+          {preview.length > 0 && (
+            <div>
+              <h4 className="text-sm font-medium mb-2">Preview (first 5 rows)</h4>
+              <div className="border rounded-lg overflow-x-auto">
+                <Table>
+                  <TableHeader>
+                    <TableRow>
+                      <TableHead>Part Number</TableHead>
+                      <TableHead>Description</TableHead>
+                      <TableHead>Vehicle</TableHead>
+                      <TableHead>GBP</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {preview.map((part, i) => (
+                      <TableRow key={i}>
+                        <TableCell className="font-mono text-xs">{part.part_number}</TableCell>
+                        <TableCell className="max-w-[200px] truncate">{part.part_description}</TableCell>
+                        <TableCell>{part.vehicle_make} {part.vehicle_model}</TableCell>
+                        <TableCell>${part.price_gbp}</TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              </div>
+            </div>
+          )}
+
+          {/* Result */}
+          {result && (
+            <Alert variant={result.failed === 0 ? 'default' : 'warning'}>
+              <CheckCircle2 className="h-4 w-4" />
+              <AlertTitle>Import Complete</AlertTitle>
+              <AlertDescription>
+                {result.imported} new parts imported, {result.updated} updated, {result.failed} failed
+              </AlertDescription>
+            </Alert>
+          )}
+        </div>
+
+        <DialogFooter>
+          <Button variant="outline" onClick={handleClose}>
+            {result ? 'Close' : 'Cancel'}
+          </Button>
+          {!result && (
+            <Button onClick={handleImport} disabled={!file || importing || preview.length === 0}>
+              {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              Import {preview.length > 0 && `${preview.length}+ Parts`}
+            </Button>
+          )}
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// PART FORM DIALOG COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+function PartFormDialog({ open, onClose, part, onSave, categories, makes }) {
+  const [formData, setFormData] = useState({
+    vehicle_make: '',
+    vehicle_model: '',
+    year_from: new Date().getFullYear(),
+    year_to: new Date().getFullYear(),
+    part_number: '',
+    part_category: '',
+    part_description: '',
+    price_gbp: 0,
+    price_usd: 0,
+    stock_status: 'In Stock',
+    compatibility_notes: ''
+  });
+  const [saving, setSaving] = useState(false);
+  const [error, setError] = useState('');
+
+  useEffect(() => {
+    if (part) {
+      setFormData({
+        vehicle_make: part.vehicleMake || '',
+        vehicle_model: part.vehicleModel || '',
+        year_from: part.yearFrom || new Date().getFullYear(),
+        year_to: part.yearTo || new Date().getFullYear(),
+        part_number: part.partNumber || '',
+        part_category: part.partCategory || '',
+        part_description: part.partDescription || '',
+        price_gbp: part.priceGbp || 0,
+        price_usd: part.priceUsd || 0,
+        stock_status: part.stockStatus || 'In Stock',
+        compatibility_notes: part.compatibilityNotes || ''
+      });
+    } else {
+      setFormData({
+        vehicle_make: '',
+        vehicle_model: '',
+        year_from: new Date().getFullYear(),
+        year_to: new Date().getFullYear(),
+        part_number: '',
+        part_category: '',
+        part_description: '',
+        price_gbp: 0,
+        price_usd: 0,
+        stock_status: 'In Stock',
+        compatibility_notes: ''
+      });
+    }
+    setError('');
+  }, [part, open]);
+
+  const handleSubmit = async (e) => {
+    e.preventDefault();
+    setSaving(true);
+    setError('');
+
+    try {
+      if (part) {
+        await updateSparePart(part.id, formData);
+      } else {
+        await createSparePart(formData);
+      }
+      onSave();
+      onClose();
+    } catch (err) {
+      setError(err.response?.data?.error || err.message || 'Failed to save');
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <Dialog open={open} onOpenChange={onClose}>
+      <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogHeader>
+          <DialogTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" />
+            {part ? 'Edit Spare Part' : 'Add New Spare Part'}
+          </DialogTitle>
+        </DialogHeader>
+
+        <form onSubmit={handleSubmit} className="space-y-4">
+          {/* Vehicle Info */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="vehicle_make">Vehicle Make *</Label>
+              <Input
+                id="vehicle_make"
+                value={formData.vehicle_make}
+                onChange={(e) => setFormData({ ...formData, vehicle_make: e.target.value })}
+                placeholder="Toyota"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="vehicle_model">Vehicle Model *</Label>
+              <Input
+                id="vehicle_model"
+                value={formData.vehicle_model}
+                onChange={(e) => setFormData({ ...formData, vehicle_model: e.target.value })}
+                placeholder="Camry"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Year Range */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="year_from">Year From *</Label>
+              <Input
+                id="year_from"
+                type="number"
+                value={formData.year_from}
+                onChange={(e) => setFormData({ ...formData, year_from: parseInt(e.target.value) })}
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="year_to">Year To *</Label>
+              <Input
+                id="year_to"
+                type="number"
+                value={formData.year_to}
+                onChange={(e) => setFormData({ ...formData, year_to: parseInt(e.target.value) })}
+                required
+              />
+            </div>
+          </div>
+
+          {/* Part Info */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="part_number">Part Number *</Label>
+              <Input
+                id="part_number"
+                value={formData.part_number}
+                onChange={(e) => setFormData({ ...formData, part_number: e.target.value })}
+                placeholder="TOY-CAM-BRK-001"
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="part_category">Category *</Label>
+              <Input
+                id="part_category"
+                value={formData.part_category}
+                onChange={(e) => setFormData({ ...formData, part_category: e.target.value })}
+                placeholder="Brakes"
+                required
+              />
+            </div>
+          </div>
+
+          {/* Description */}
+          <div>
+            <Label htmlFor="part_description">Description *</Label>
+            <Textarea
+              id="part_description"
+              value={formData.part_description}
+              onChange={(e) => setFormData({ ...formData, part_description: e.target.value })}
+              placeholder="Front Brake Pad Set - Ceramic"
+              required
+            />
+          </div>
+
+          {/* Pricing */}
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <Label htmlFor="price_gbp">Price (GBP) *</Label>
+              <Input
+                id="price_gbp"
+                type="number"
+                step="0.01"
+                value={formData.price_gbp}
+                onChange={(e) => setFormData({ ...formData, price_gbp: parseFloat(e.target.value) })}
+                required
+              />
+            </div>
+            <div>
+              <Label htmlFor="price_usd">Price (USD) *</Label>
+              <Input
+                id="price_usd"
+                type="number"
+                step="0.01"
+                value={formData.price_usd}
+                onChange={(e) => setFormData({ ...formData, price_usd: parseFloat(e.target.value) })}
+                required
+              />
+            </div>
+          </div>
+
+          {/* Stock Status */}
+          <div>
+            <Label htmlFor="stock_status">Stock Status</Label>
+            <Select
+              value={formData.stock_status}
+              onValueChange={(value) => setFormData({ ...formData, stock_status: value })}
+            >
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="In Stock">In Stock</SelectItem>
+                <SelectItem value="Low Stock">Low Stock</SelectItem>
+                <SelectItem value="Out of Stock">Out of Stock</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+
+          {/* Compatibility Notes */}
+          <div>
+            <Label htmlFor="compatibility_notes">Compatibility Notes</Label>
+            <Textarea
+              id="compatibility_notes"
+              value={formData.compatibility_notes}
+              onChange={(e) => setFormData({ ...formData, compatibility_notes: e.target.value })}
+              placeholder="Fits all trim levels"
+            />
+          </div>
+
+          {error && (
+            <Alert variant="destructive">
+              <AlertCircle className="h-4 w-4" />
+              <AlertDescription>{error}</AlertDescription>
+            </Alert>
+          )}
+
+          <DialogFooter>
+            <Button type="button" variant="outline" onClick={onClose}>Cancel</Button>
+            <Button type="submit" disabled={saving}>
+              {saving && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
+              {part ? 'Update' : 'Create'}
+            </Button>
+          </DialogFooter>
+        </form>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// MAIN COMPONENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+export default function SparePartsPage() {
+  const [parts, setParts] = useState([]);
+  const [categories, setCategories] = useState([]);
+  const [makes, setMakes] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [selectedCategory, setSelectedCategory] = useState('');
+  const [selectedMake, setSelectedMake] = useState('');
+  const [searchQuery, setSearchQuery] = useState('');
+  const [searchResults, setSearchResults] = useState(null);
+  const [searching, setSearching] = useState(false);
+
+  // Dialog states
+  const [importDialogOpen, setImportDialogOpen] = useState(false);
+  const [formDialogOpen, setFormDialogOpen] = useState(false);
+  const [editingPart, setEditingPart] = useState(null);
+  const [deletingPart, setDeletingPart] = useState(null);
+
+  // Load parts
+  const loadParts = useCallback(async () => {
+    try {
+      setLoading(true);
+      const filters = {};
+      if (selectedCategory) filters.category = selectedCategory;
+      if (selectedMake) filters.make = selectedMake;
+
+      const response = await getSpareParts(filters);
+      setParts(response.parts || []);
+      setCategories(response.categories || []);
+      setMakes(response.makes || []);
+    } catch (err) {
+      console.error('Failed to load spare parts:', err);
+    } finally {
+      setLoading(false);
+    }
+  }, [selectedCategory, selectedMake]);
+
+  useEffect(() => {
+    loadParts();
+  }, [loadParts]);
+
+  // Search
+  const handleSearch = async () => {
+    if (!searchQuery.trim()) {
+      setSearchResults(null);
+      return;
+    }
+
+    setSearching(true);
+    try {
+      const response = await searchSpareParts(searchQuery, 10);
+      setSearchResults(response.parts || []);
+    } catch (err) {
+      console.error('Search failed:', err);
+    } finally {
+      setSearching(false);
+    }
+  };
+
+  // Delete
+  const handleDelete = async () => {
+    if (!deletingPart) return;
+
+    try {
+      await deleteSparePart(deletingPart.id);
+      setDeletingPart(null);
+      loadParts();
+    } catch (err) {
+      console.error('Delete failed:', err);
+    }
+  };
+
+  // Stock status badge variant
+  const getStockBadgeVariant = (status) => {
+    switch (status) {
+      case 'In Stock': return 'default';
+      case 'Low Stock': return 'warning';
+      case 'Out of Stock': return 'destructive';
+      default: return 'secondary';
+    }
+  };
+
+  const displayParts = searchResults || parts;
+
+  if (loading && parts.length === 0) {
+    return (
+      <div className="flex items-center justify-center h-64">
+        <Loader2 className="h-8 w-8 animate-spin text-muted-foreground" />
+      </div>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Spare Parts Catalog</h1>
+          <p className="text-muted-foreground">
+            Manage vehicle spare parts for the chatbot knowledge base
+          </p>
+        </div>
+        <div className="flex gap-2">
+          <Button variant="outline" onClick={() => setImportDialogOpen(true)}>
+            <Upload className="mr-2 h-4 w-4" />
+            Import CSV
+          </Button>
+          <Button onClick={() => { setEditingPart(null); setFormDialogOpen(true); }}>
+            <Plus className="mr-2 h-4 w-4" />
+            Add Part
+          </Button>
+        </div>
+      </div>
+
+      {/* Filters and Search */}
+      <Card>
+        <CardContent className="pt-6">
+          <div className="flex flex-wrap gap-4">
+            {/* Category Filter */}
+            <div className="w-48">
+              <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Categories" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All Categories</SelectItem>
+                  {categories.map(cat => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Make Filter */}
+            <div className="w-48">
+              <Select value={selectedMake} onValueChange={setSelectedMake}>
+                <SelectTrigger>
+                  <SelectValue placeholder="All Makes" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="">All Makes</SelectItem>
+                  {makes.map(make => (
+                    <SelectItem key={make} value={make}>{make}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+
+            {/* Search */}
+            <div className="flex-1 flex gap-2">
+              <Input
+                placeholder="Search parts (e.g., 'Toyota brake pads')"
+                value={searchQuery}
+                onChange={(e) => setSearchQuery(e.target.value)}
+                onKeyDown={(e) => e.key === 'Enter' && handleSearch()}
+              />
+              <Button variant="secondary" onClick={handleSearch} disabled={searching}>
+                {searching ? (
+                  <Loader2 className="h-4 w-4 animate-spin" />
+                ) : (
+                  <Search className="h-4 w-4" />
+                )}
+              </Button>
+              {searchResults && (
+                <Button variant="ghost" onClick={() => { setSearchResults(null); setSearchQuery(''); }}>
+                  Clear
+                </Button>
+              )}
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      {/* Parts Table */}
+      <Card>
+        <CardHeader>
+          <CardTitle className="flex items-center gap-2">
+            <Package className="h-5 w-5" />
+            {searchResults ? `Search Results (${displayParts.length})` : `Parts (${displayParts.length})`}
+          </CardTitle>
+          <CardDescription>
+            {searchResults ? 'Parts matching your search query' : 'All spare parts in the catalog'}
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          {displayParts.length === 0 ? (
+            <div className="text-center py-12">
+              <Package className="h-12 w-12 text-muted-foreground mx-auto mb-4" />
+              <p className="text-muted-foreground">No spare parts found</p>
+              <Button className="mt-4" onClick={() => setImportDialogOpen(true)}>
+                <Upload className="mr-2 h-4 w-4" />
+                Import CSV
+              </Button>
+            </div>
+          ) : (
+            <div className="border rounded-lg overflow-x-auto">
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead>Part Number</TableHead>
+                    <TableHead>Description</TableHead>
+                    <TableHead>Vehicle</TableHead>
+                    <TableHead>Years</TableHead>
+                    <TableHead>Category</TableHead>
+                    <TableHead>Price</TableHead>
+                    <TableHead>Stock</TableHead>
+                    <TableHead className="text-right">Actions</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  {displayParts.map((part) => (
+                    <TableRow key={part.id}>
+                      <TableCell className="font-mono text-xs">{part.partNumber}</TableCell>
+                      <TableCell className="max-w-[200px] truncate">{part.partDescription}</TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <Car className="h-3 w-3" />
+                          {part.vehicleMake} {part.vehicleModel}
+                        </div>
+                      </TableCell>
+                      <TableCell>{part.yearFrom}-{part.yearTo}</TableCell>
+                      <TableCell>
+                        <Badge variant="outline">{part.partCategory}</Badge>
+                      </TableCell>
+                      <TableCell>
+                        <div className="flex items-center gap-1">
+                          <DollarSign className="h-3 w-3" />
+                          <span className="font-mono">{part.priceGbp?.toFixed(2)}</span>
+                        </div>
+                      </TableCell>
+                      <TableCell>
+                        <Badge variant={getStockBadgeVariant(part.stockStatus)}>
+                          {part.stockStatus}
+                        </Badge>
+                      </TableCell>
+                      <TableCell className="text-right">
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => { setEditingPart(part); setFormDialogOpen(true); }}
+                        >
+                          <Pencil className="h-4 w-4" />
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          onClick={() => setDeletingPart(part)}
+                        >
+                          <Trash2 className="h-4 w-4 text-destructive" />
+                        </Button>
+                      </TableCell>
+                    </TableRow>
+                  ))}
+                </TableBody>
+              </Table>
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      {/* Import Dialog */}
+      <ImportDialog
+        open={importDialogOpen}
+        onClose={() => setImportDialogOpen(false)}
+        onImport={loadParts}
+      />
+
+      {/* Add/Edit Dialog */}
+      <PartFormDialog
+        open={formDialogOpen}
+        onClose={() => { setFormDialogOpen(false); setEditingPart(null); }}
+        part={editingPart}
+        onSave={loadParts}
+        categories={categories}
+        makes={makes}
+      />
+
+      {/* Delete Confirmation */}
+      <Dialog open={!!deletingPart} onOpenChange={() => setDeletingPart(null)}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Delete Spare Part</DialogTitle>
+            <DialogDescription>
+              Are you sure you want to delete "{deletingPart?.partDescription}"?
+              This action cannot be undone.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setDeletingPart(null)}>Cancel</Button>
+            <Button variant="destructive" onClick={handleDelete}>Delete</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}

@@ -306,6 +306,133 @@ export async function bulkImportDocuments(documents) {
 }
 
 // ═══════════════════════════════════════════════════════════════════════════════
+// SPARE PARTS CATALOG MANAGEMENT
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Get all spare parts with optional filtering.
+ *
+ * @param {Object} [filters] - Optional filters
+ * @param {string} [filters.category] - Filter by part category
+ * @param {string} [filters.make] - Filter by vehicle make
+ * @param {string} [filters.stockStatus] - Filter by stock status
+ * @returns {Promise<Object>} Object with parts array, categories, and makes
+ */
+export async function getSpareParts(filters = {}) {
+  const params = new URLSearchParams();
+  if (filters.category) params.append('category', filters.category);
+  if (filters.make) params.append('make', filters.make);
+  if (filters.stockStatus) params.append('stockStatus', filters.stockStatus);
+
+  const queryString = params.toString();
+  const url = queryString ? `/api/admin/spare-parts?${queryString}` : '/api/admin/spare-parts';
+  const response = await adminRequest('get', url);
+  return response.data;
+}
+
+/**
+ * Get a single spare part by ID.
+ *
+ * @param {number} id - Spare part ID
+ * @returns {Promise<Object>} Spare part object
+ */
+export async function getSparePart(id) {
+  const response = await adminRequest('get', `/api/admin/spare-parts/${id}`);
+  return response.data;
+}
+
+/**
+ * Get all models for a specific vehicle make.
+ *
+ * @param {string} make - Vehicle manufacturer
+ * @returns {Promise<Object>} Object with models array
+ */
+export async function getModelsByMake(make) {
+  const response = await adminRequest('get', `/api/admin/spare-parts/models/${encodeURIComponent(make)}`);
+  return response.data;
+}
+
+/**
+ * Create a new spare part.
+ *
+ * @param {Object} data - Spare part data with exact CSV column names:
+ *   - vehicle_make, vehicle_model, year_from, year_to
+ *   - part_number, part_category, part_description
+ *   - price_gbp, price_usd, stock_status, compatibility_notes
+ * @returns {Promise<Object>} Created spare part
+ */
+export async function createSparePart(data) {
+  const response = await adminRequest('post', '/api/admin/spare-parts', data);
+  return response.data;
+}
+
+/**
+ * Update an existing spare part.
+ *
+ * @param {number} id - Spare part ID
+ * @param {Object} data - Updated spare part data
+ * @returns {Promise<Object>} Updated spare part
+ */
+export async function updateSparePart(id, data) {
+  const response = await adminRequest('put', `/api/admin/spare-parts/${id}`, data);
+  return response.data;
+}
+
+/**
+ * Delete a spare part.
+ *
+ * @param {number} id - Spare part ID
+ * @returns {Promise<Object>} Deletion confirmation
+ */
+export async function deleteSparePart(id) {
+  const response = await adminRequest('delete', `/api/admin/spare-parts/${id}`);
+  return response.data;
+}
+
+/**
+ * Search spare parts using RAG algorithm.
+ *
+ * @param {string} query - Search query text
+ * @param {number} [limit=5] - Maximum results
+ * @returns {Promise<Object>} Object with matching parts
+ */
+export async function searchSpareParts(query, limit = 5) {
+  const response = await adminRequest('post', '/api/admin/spare-parts/search', { query, limit });
+  return response.data;
+}
+
+/**
+ * Bulk import spare parts from CSV data.
+ *
+ * Accepts an array of objects matching exact CSV column format.
+ * Updates existing parts if part_number already exists.
+ *
+ * Expected format (exact CSV columns):
+ * - vehicle_make: Vehicle manufacturer
+ * - vehicle_model: Vehicle model
+ * - year_from: Start year of compatibility
+ * - year_to: End year of compatibility
+ * - part_number: Unique part identifier
+ * - part_category: Part category (Brakes, Filters, etc.)
+ * - part_description: Human-readable description
+ * - price_gbp: Price in British Pounds
+ * - price_usd: Price in US Dollars
+ * - stock_status: Availability (In Stock, Out of Stock)
+ * - compatibility_notes: Additional notes
+ *
+ * @param {Array} parts - Array of spare part objects
+ * @returns {Promise<Object>} Import result with counts:
+ *   - imported: Number of new parts imported
+ *   - updated: Number of existing parts updated
+ *   - failed: Number that failed
+ *   - errors: Array of error details
+ */
+export async function bulkImportSpareParts(parts) {
+  const response = await adminRequest('post', '/api/admin/spare-parts/bulk-import', { parts });
+  return response.data;
+}
+
+// ═══════════════════════════════════════════════════════════════════════════════
 // AUTHENTICATION VERIFICATION
 // ═══════════════════════════════════════════════════════════════════════════════
 

@@ -51,6 +51,7 @@ import {
 import RulesPage from './admin/pages/RulesPage';
 import ModerationSettingsPage from './admin/pages/ModerationSettingsPage';
 import EscalationSettingsPage from './admin/pages/EscalationSettingsPage';
+import SparePartsPage from './admin/pages/SparePartsPage';
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CHAT APPLICATION COMPONENT
@@ -181,6 +182,18 @@ function App() {
             <ProtectedRoute>
               <AdminLayout>
                 <KnowledgeBasePage />
+              </AdminLayout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Spare Parts - Manage vehicle spare parts catalog */}
+        <Route
+          path="/admin/spare-parts"
+          element={
+            <ProtectedRoute>
+              <AdminLayout>
+                <SparePartsPage />
               </AdminLayout>
             </ProtectedRoute>
           }
