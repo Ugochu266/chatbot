@@ -32,7 +32,8 @@ import {
   AlertCircle,
   CheckCircle2,
   Car,
-  DollarSign
+  ChevronLeft,
+  ChevronRight
 } from 'lucide-react';
 import { Button } from '../../components/ui/button';
 import { Input } from '../../components/ui/input';
@@ -68,6 +69,7 @@ import {
   AlertDescription,
   AlertTitle,
 } from '../../components/ui/alert';
+import { Progress } from '../../components/ui/progress';
 import {
   getSpareParts,
   createSparePart,
@@ -76,6 +78,77 @@ import {
   searchSpareParts,
   bulkImportSpareParts
 } from '../../services/adminService';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHUNKED UPLOAD UTILITIES
+// Splits large datasets into smaller batches for reliable upload
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Split an array into chunks of specified size.
+ * This enables uploading large datasets without hitting payload limits.
+ *
+ * @param {Array} array - The array to split
+ * @param {number} chunkSize - Maximum items per chunk
+ * @returns {Array<Array>} Array of chunks
+ */
+function chunkArray(array, chunkSize) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += chunkSize) {
+    chunks.push(array.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+/**
+ * Upload data in chunks with progress tracking.
+ * Processes each chunk sequentially and accumulates results.
+ *
+ * @param {Array} items - All items to upload
+ * @param {Function} uploadFn - Function to call for each chunk
+ * @param {Function} onProgress - Callback with progress (0-100)
+ * @param {number} chunkSize - Items per chunk (default: 50)
+ * @returns {Promise<Object>} Accumulated results
+ */
+async function uploadInChunks(items, uploadFn, onProgress, chunkSize = 50) {
+  const chunks = chunkArray(items, chunkSize);
+  const totalChunks = chunks.length;
+
+  // Accumulated results
+  const results = {
+    imported: 0,
+    updated: 0,
+    failed: 0,
+    errors: []
+  };
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+
+    try {
+      const chunkResult = await uploadFn(chunk);
+
+      // Accumulate results
+      results.imported += chunkResult.imported || 0;
+      results.updated += chunkResult.updated || 0;
+      results.failed += chunkResult.failed || 0;
+
+      if (chunkResult.errors) {
+        results.errors.push(...chunkResult.errors);
+      }
+    } catch (error) {
+      // Mark all items in failed chunk as failed
+      results.failed += chunk.length;
+      results.errors.push(`Chunk ${i + 1} failed: ${error.message}`);
+    }
+
+    // Update progress (0-100)
+    const progress = Math.round(((i + 1) / totalChunks) * 100);
+    onProgress(progress, i + 1, totalChunks);
+  }
+
+  return results;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // CSV PARSING UTILITIES
@@ -168,10 +241,14 @@ function parseCSV(content) {
 function ImportDialog({ open, onClose, onImport }) {
   const [file, setFile] = useState(null);
   const [preview, setPreview] = useState([]);
+  const [totalParts, setTotalParts] = useState(0);
   const [error, setError] = useState('');
   const [importing, setImporting] = useState(false);
   const [result, setResult] = useState(null);
+  const [progress, setProgress] = useState(0);
+  const [progressText, setProgressText] = useState('');
   const fileInputRef = useRef(null);
+  const parsedPartsRef = useRef([]);
 
   const handleFileChange = (e) => {
     const selectedFile = e.target.files[0];
@@ -179,12 +256,18 @@ function ImportDialog({ open, onClose, onImport }) {
     setError('');
     setResult(null);
     setPreview([]);
+    setTotalParts(0);
+    setProgress(0);
+    setProgressText('');
+    parsedPartsRef.current = [];
 
     if (selectedFile) {
       const reader = new FileReader();
       reader.onload = (event) => {
         try {
           const parts = parseCSV(event.target.result);
+          parsedPartsRef.current = parts;
+          setTotalParts(parts.length);
           setPreview(parts.slice(0, 5));
         } catch (err) {
           setError(err.message);
@@ -195,30 +278,37 @@ function ImportDialog({ open, onClose, onImport }) {
   };
 
   const handleImport = async () => {
-    if (!file) return;
+    if (!file || parsedPartsRef.current.length === 0) return;
 
     setImporting(true);
     setError('');
+    setProgress(0);
+    setProgressText('Starting import...');
 
     try {
-      const reader = new FileReader();
-      reader.onload = async (event) => {
-        try {
-          const parts = parseCSV(event.target.result);
-          const importResult = await bulkImportSpareParts(parts);
-          setResult(importResult);
-          if (importResult.imported > 0 || importResult.updated > 0) {
-            onImport();
-          }
-        } catch (err) {
-          setError(err.message || 'Import failed');
-        } finally {
-          setImporting(false);
-        }
-      };
-      reader.readAsText(file);
+      const parts = parsedPartsRef.current;
+
+      // Use chunked upload for large files (clever algorithm)
+      // Chunk size of 50 keeps each request small (~50KB)
+      const importResult = await uploadInChunks(
+        parts,
+        bulkImportSpareParts,
+        (pct, currentChunk, totalChunks) => {
+          setProgress(pct);
+          setProgressText(`Processing chunk ${currentChunk} of ${totalChunks}...`);
+        },
+        50 // 50 items per chunk
+      );
+
+      setResult(importResult);
+      setProgressText('Import complete!');
+
+      if (importResult.imported > 0 || importResult.updated > 0) {
+        onImport();
+      }
     } catch (err) {
-      setError(err.message);
+      setError(err.message || 'Import failed');
+    } finally {
       setImporting(false);
     }
   };
@@ -226,8 +316,12 @@ function ImportDialog({ open, onClose, onImport }) {
   const handleClose = () => {
     setFile(null);
     setPreview([]);
+    setTotalParts(0);
     setError('');
     setResult(null);
+    setProgress(0);
+    setProgressText('');
+    parsedPartsRef.current = [];
     onClose();
   };
 
@@ -272,7 +366,7 @@ function ImportDialog({ open, onClose, onImport }) {
               <div className="flex items-center justify-center gap-2">
                 <FileText className="h-6 w-6 text-primary" />
                 <span className="font-medium">{file.name}</span>
-                <Badge variant="secondary">{preview.length}+ parts</Badge>
+                <Badge variant="secondary">{totalParts.toLocaleString()} parts</Badge>
               </div>
             ) : (
               <div className="text-muted-foreground">
@@ -319,26 +413,51 @@ function ImportDialog({ open, onClose, onImport }) {
             </div>
           )}
 
+          {/* Progress Bar - shown during import */}
+          {importing && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{progressText}</span>
+                <span className="font-medium">{progress}%</span>
+              </div>
+              <Progress value={progress} max={100} />
+              <p className="text-xs text-muted-foreground text-center">
+                Uploading in chunks to handle large files...
+              </p>
+            </div>
+          )}
+
           {/* Result */}
           {result && (
             <Alert variant={result.failed === 0 ? 'default' : 'warning'}>
               <CheckCircle2 className="h-4 w-4" />
               <AlertTitle>Import Complete</AlertTitle>
               <AlertDescription>
-                {result.imported} new parts imported, {result.updated} updated, {result.failed} failed
+                <p>{result.imported.toLocaleString()} new parts imported, {result.updated.toLocaleString()} updated, {result.failed.toLocaleString()} failed</p>
+                {result.errors && result.errors.length > 0 && (
+                  <details className="mt-2">
+                    <summary className="cursor-pointer text-xs">View errors ({result.errors.length})</summary>
+                    <ul className="mt-1 text-xs list-disc list-inside max-h-24 overflow-y-auto">
+                      {result.errors.slice(0, 10).map((err, i) => (
+                        <li key={i}>{err}</li>
+                      ))}
+                      {result.errors.length > 10 && <li>...and {result.errors.length - 10} more</li>}
+                    </ul>
+                  </details>
+                )}
               </AlertDescription>
             </Alert>
           )}
         </div>
 
         <DialogFooter>
-          <Button variant="outline" onClick={handleClose}>
+          <Button variant="outline" onClick={handleClose} disabled={importing}>
             {result ? 'Close' : 'Cancel'}
           </Button>
           {!result && (
-            <Button onClick={handleImport} disabled={!file || importing || preview.length === 0}>
+            <Button onClick={handleImport} disabled={!file || importing || totalParts === 0}>
               {importing && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-              Import {preview.length > 0 && `${preview.length}+ Parts`}
+              {importing ? `Importing...` : `Import ${totalParts.toLocaleString()} Parts`}
             </Button>
           )}
         </DialogFooter>
@@ -606,6 +725,10 @@ export default function SparePartsPage() {
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
 
+  // Pagination state
+  const [page, setPage] = useState(1);
+  const limit = 10; // Items per page
+
   // Dialog states
   const [importDialogOpen, setImportDialogOpen] = useState(false);
   const [formDialogOpen, setFormDialogOpen] = useState(false);
@@ -678,6 +801,15 @@ export default function SparePartsPage() {
 
   const displayParts = searchResults || parts;
 
+  // Pagination calculations
+  const totalPages = Math.ceil(displayParts.length / limit);
+  const paginatedParts = displayParts.slice((page - 1) * limit, page * limit);
+
+  // Reset to page 1 when filters change
+  useEffect(() => {
+    setPage(1);
+  }, [selectedCategory, selectedMake, searchResults]);
+
   if (loading && parts.length === 0) {
     return (
       <div className="flex items-center justify-center h-64">
@@ -714,12 +846,15 @@ export default function SparePartsPage() {
           <div className="flex flex-wrap gap-4">
             {/* Category Filter */}
             <div className="w-48">
-              <Select value={selectedCategory} onValueChange={setSelectedCategory}>
+              <Select
+                value={selectedCategory || 'all'}
+                onValueChange={(val) => setSelectedCategory(val === 'all' ? '' : val)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="All Categories" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Categories</SelectItem>
+                  <SelectItem value="all">All Categories</SelectItem>
                   {categories.map(cat => (
                     <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                   ))}
@@ -729,12 +864,15 @@ export default function SparePartsPage() {
 
             {/* Make Filter */}
             <div className="w-48">
-              <Select value={selectedMake} onValueChange={setSelectedMake}>
+              <Select
+                value={selectedMake || 'all'}
+                onValueChange={(val) => setSelectedMake(val === 'all' ? '' : val)}
+              >
                 <SelectTrigger>
                   <SelectValue placeholder="All Makes" />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="">All Makes</SelectItem>
+                  <SelectItem value="all">All Makes</SelectItem>
                   {makes.map(make => (
                     <SelectItem key={make} value={make}>{make}</SelectItem>
                   ))}
@@ -804,7 +942,7 @@ export default function SparePartsPage() {
                   </TableRow>
                 </TableHeader>
                 <TableBody>
-                  {displayParts.map((part) => (
+                  {paginatedParts.map((part) => (
                     <TableRow key={part.id}>
                       <TableCell className="font-mono text-xs">{part.partNumber}</TableCell>
                       <TableCell className="max-w-[200px] truncate">{part.partDescription}</TableCell>
@@ -819,10 +957,7 @@ export default function SparePartsPage() {
                         <Badge variant="outline">{part.partCategory}</Badge>
                       </TableCell>
                       <TableCell>
-                        <div className="flex items-center gap-1">
-                          <DollarSign className="h-3 w-3" />
-                          <span className="font-mono">{part.priceGbp?.toFixed(2)}</span>
-                        </div>
+                        <span className="font-mono">£{part.priceGbp?.toFixed(2)}</span>
                       </TableCell>
                       <TableCell>
                         <Badge variant={getStockBadgeVariant(part.stockStatus)}>
@@ -849,6 +984,36 @@ export default function SparePartsPage() {
                   ))}
                 </TableBody>
               </Table>
+            </div>
+          )}
+
+          {/* Pagination Controls */}
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-4 border-t mt-4">
+              <p className="text-sm text-muted-foreground">
+                Showing {((page - 1) * limit) + 1}-{Math.min(page * limit, displayParts.length)} of {displayParts.length} parts
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage(p => p - 1)}
+                  disabled={page <= 1}
+                >
+                  <ChevronLeft className="h-4 w-4" />
+                </Button>
+                <span className="text-sm text-muted-foreground">
+                  Page {page} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setPage(p => p + 1)}
+                  disabled={page >= totalPages}
+                >
+                  <ChevronRight className="h-4 w-4" />
+                </Button>
+              </div>
             </div>
           )}
         </CardContent>

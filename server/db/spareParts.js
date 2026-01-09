@@ -96,43 +96,77 @@ export async function initSparePartsTable() {
  * @returns {Promise<Array>} Array of matching spare parts sorted by relevance
  */
 export async function searchSpareParts(query, limit = 5) {
-  // Extract keywords from query
-  const keywords = query
+  // Stop words - common words that don't help with parts search
+  // IMPORTANT: "for" is here because it matches Ford's "FOR-" prefix in part numbers
+  const stopWords = new Set([
+    'a', 'an', 'the', 'is', 'are', 'was', 'were', 'be', 'been', 'being',
+    'have', 'has', 'had', 'do', 'does', 'did', 'will', 'would', 'could', 'should',
+    'may', 'might', 'must', 'can', 'to', 'of', 'in', 'for', 'on', 'with', 'at',
+    'by', 'from', 'as', 'into', 'through', 'during', 'before', 'after',
+    'and', 'but', 'if', 'or', 'because', 'until', 'while', 'about',
+    'what', 'which', 'who', 'whom', 'this', 'that', 'these', 'those',
+    'am', 'i', 'me', 'my', 'we', 'our', 'you', 'your', 'he', 'him', 'his',
+    'she', 'her', 'it', 'its', 'they', 'them', 'their',
+    'hi', 'hello', 'hey', 'please', 'thanks', 'thank', 'looking', 'need',
+    'want', 'find', 'get', 'search', 'show', 'give', 'whats', 'price', 'cost',
+    'how', 'much', 'many', 'some', 'any'
+  ]);
+
+  // Extract keywords from query, preserving hyphens for part number matching
+  const words = query
     .toLowerCase()
-    .replace(/[^\w\s]/g, '')
+    .replace(/[^\w\s-]/g, '') // Keep hyphens for part numbers
     .split(/\s+/)
-    .filter(word => word.length > 2);
+    .filter(word => {
+      // Keep words that are:
+      // - At least 2 chars AND alphanumeric (for model names like A4, Q5, X5)
+      // - OR at least 3 chars for regular words
+      // - AND not in stop words
+      if (stopWords.has(word)) return false;
+      if (word.length >= 3) return true;
+      if (word.length >= 2 && /^[a-z]\d+$/i.test(word)) return true; // A4, Q5, X5, etc.
+      return false;
+    });
+
+  // Also extract individual hyphen-separated components (e.g., "AUD-A4-OIL-001" -> ["aud", "a4", "oil", "001"])
+  const hyphenParts = words
+    .filter(word => word.includes('-'))
+    .flatMap(word => word.split('-'))
+    .filter(part => part.length >= 2 && !stopWords.has(part));
+
+  // Combine unique keywords: full words (including hyphenated) + hyphen components
+  const keywords = [...new Set([...words, ...hyphenParts])];
 
   if (keywords.length === 0) {
     return [];
   }
 
-  // Build search pattern for ILIKE
-  const searchPattern = `%${keywords.join('%')}%`;
+  // Build search patterns - one for each keyword
+  const searchPatterns = keywords.map(k => `%${k}%`);
 
   const results = await sql`
     SELECT *,
       (
         -- Part number match (highest priority)
-        CASE WHEN LOWER(part_number) LIKE ANY(${keywords.map(k => `%${k}%`)}) THEN 10 ELSE 0 END +
+        CASE WHEN LOWER(part_number) LIKE ANY(${searchPatterns}) THEN 10 ELSE 0 END +
         -- Vehicle make match
-        CASE WHEN LOWER(vehicle_make) LIKE ANY(${keywords.map(k => `%${k}%`)}) THEN 5 ELSE 0 END +
+        CASE WHEN LOWER(vehicle_make) LIKE ANY(${searchPatterns}) THEN 5 ELSE 0 END +
         -- Vehicle model match
-        CASE WHEN LOWER(vehicle_model) LIKE ANY(${keywords.map(k => `%${k}%`)}) THEN 5 ELSE 0 END +
+        CASE WHEN LOWER(vehicle_model) LIKE ANY(${searchPatterns}) THEN 5 ELSE 0 END +
         -- Part category match
-        CASE WHEN LOWER(part_category) LIKE ANY(${keywords.map(k => `%${k}%`)}) THEN 3 ELSE 0 END +
+        CASE WHEN LOWER(part_category) LIKE ANY(${searchPatterns}) THEN 3 ELSE 0 END +
         -- Description keyword matches
         (SELECT COUNT(*) FROM unnest(${keywords}::text[]) AS kw
          WHERE LOWER(part_description) LIKE '%' || kw || '%')
       ) as relevance_score
     FROM spare_parts
     WHERE
-      LOWER(part_number) LIKE ${searchPattern} OR
-      LOWER(vehicle_make) LIKE ${searchPattern} OR
-      LOWER(vehicle_model) LIKE ${searchPattern} OR
-      LOWER(part_category) LIKE ${searchPattern} OR
-      LOWER(part_description) LIKE ${searchPattern} OR
-      LOWER(compatibility_notes) LIKE ${searchPattern}
+      LOWER(part_number) LIKE ANY(${searchPatterns}) OR
+      LOWER(vehicle_make) LIKE ANY(${searchPatterns}) OR
+      LOWER(vehicle_model) LIKE ANY(${searchPatterns}) OR
+      LOWER(part_category) LIKE ANY(${searchPatterns}) OR
+      LOWER(part_description) LIKE ANY(${searchPatterns}) OR
+      LOWER(compatibility_notes) LIKE ANY(${searchPatterns})
     ORDER BY relevance_score DESC
     LIMIT ${limit}
   `;

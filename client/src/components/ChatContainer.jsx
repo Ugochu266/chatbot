@@ -169,6 +169,7 @@ function ChatContainer({ conversationId, onConversationCreate }) {
 
       // ─────────────────────────────────────────────────────────────────────────
       // SUCCESS: Replace placeholder with actual response
+      // Handle both normal responses and blocked messages (blocked flag is inside assistantMessage)
       // ─────────────────────────────────────────────────────────────────────────
       if (result?.assistantMessage) {
         replaceLastMessage({
@@ -176,17 +177,32 @@ function ChatContainer({ conversationId, onConversationCreate }) {
           role: 'assistant',
           content: result.assistantMessage.content,
           createdAt: result.assistantMessage.createdAt,
-          isProcessing: false
+          isProcessing: false,
+          // Preserve blocked/error flag if message was blocked by safety rules
+          isError: result.assistantMessage.blocked || false
         });
       } else if (result?.blocked) {
         // ─────────────────────────────────────────────────────────────────────────
-        // BLOCKED: Message was blocked by safety rules
+        // BLOCKED: Message was blocked by safety rules (legacy response format)
         // Show the block reason/message to the user
         // ─────────────────────────────────────────────────────────────────────────
         replaceLastMessage({
           id: `blocked-${Date.now()}`,
           role: 'assistant',
           content: result.message || 'Your message could not be processed due to content restrictions.',
+          createdAt: new Date().toISOString(),
+          isProcessing: false,
+          isError: true
+        });
+      } else {
+        // ─────────────────────────────────────────────────────────────────────────
+        // FALLBACK: Unexpected response format - remove stuck placeholder
+        // Prevents UI from showing indefinite loading state
+        // ─────────────────────────────────────────────────────────────────────────
+        replaceLastMessage({
+          id: `fallback-${Date.now()}`,
+          role: 'assistant',
+          content: 'Unable to process your request. Please try again.',
           createdAt: new Date().toISOString(),
           isProcessing: false,
           isError: true

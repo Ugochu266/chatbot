@@ -75,6 +75,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from '../../components/ui/select';
+import { Progress } from '../../components/ui/progress';
 import {
   getKnowledgeBase,
   createDocument,
@@ -82,6 +83,89 @@ import {
   deleteDocument,
   bulkImportDocuments
 } from '../../services/adminService';
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// CHUNKED UPLOAD UTILITIES
+// Splits large datasets into smaller batches for reliable upload
+// ═══════════════════════════════════════════════════════════════════════════════
+
+/**
+ * Split an array into chunks of specified size.
+ * This enables uploading large datasets without hitting payload limits.
+ *
+ * @param {Array} array - The array to split
+ * @param {number} chunkSize - Maximum items per chunk
+ * @returns {Array<Array>} Array of chunks
+ */
+function chunkArray(array, chunkSize) {
+  const chunks = [];
+  for (let i = 0; i < array.length; i += chunkSize) {
+    chunks.push(array.slice(i, i + chunkSize));
+  }
+  return chunks;
+}
+
+/**
+ * Upload data in chunks with progress tracking.
+ * Processes each chunk sequentially and accumulates results.
+ *
+ * @param {Array} items - All items to upload
+ * @param {Function} uploadFn - Function to call for each chunk
+ * @param {Function} onProgress - Callback with progress (0-100)
+ * @param {number} chunkSize - Items per chunk (default: 50)
+ * @returns {Promise<Object>} Accumulated results
+ */
+async function uploadInChunks(items, uploadFn, onProgress, chunkSize = 50) {
+  const chunks = chunkArray(items, chunkSize);
+  const totalChunks = chunks.length;
+
+  // Accumulated results
+  const results = {
+    success: true,
+    imported: 0,
+    failed: 0,
+    errors: [],
+    message: ''
+  };
+
+  for (let i = 0; i < chunks.length; i++) {
+    const chunk = chunks[i];
+
+    try {
+      const chunkResult = await uploadFn(chunk);
+
+      // Accumulate results
+      results.imported += chunkResult.imported || 0;
+      results.failed += chunkResult.failed || 0;
+
+      if (chunkResult.errors) {
+        results.errors.push(...chunkResult.errors);
+      }
+    } catch (error) {
+      // Mark all items in failed chunk as failed
+      results.failed += chunk.length;
+      results.errors.push({ title: `Chunk ${i + 1}`, error: error.message });
+      results.success = false;
+    }
+
+    // Update progress (0-100)
+    const progress = Math.round(((i + 1) / totalChunks) * 100);
+    onProgress(progress, i + 1, totalChunks);
+  }
+
+  // Set final message
+  if (results.imported > 0 && results.failed === 0) {
+    results.message = `Successfully imported ${results.imported} documents`;
+  } else if (results.imported > 0) {
+    results.message = `Imported ${results.imported} documents with ${results.failed} failures`;
+    results.success = results.failed < results.imported; // Partial success
+  } else {
+    results.message = `Import failed: ${results.failed} documents could not be imported`;
+    results.success = false;
+  }
+
+  return results;
+}
 
 // ═══════════════════════════════════════════════════════════════════════════════
 // HELPER COMPONENTS
@@ -475,6 +559,8 @@ function ImportDialog({ open, onClose, onImportComplete }) {
   const [importing, setImporting] = useState(false);   // Import in progress
   const [importResult, setImportResult] = useState(null); // Import result
   const [fileName, setFileName] = useState('');        // Selected file name
+  const [progress, setProgress] = useState(0);         // Upload progress (0-100)
+  const [progressText, setProgressText] = useState(''); // Progress status text
   const fileInputRef = useRef(null);
 
   // Reset state when dialog closes
@@ -484,6 +570,8 @@ function ImportDialog({ open, onClose, onImportComplete }) {
       setParseError('');
       setImportResult(null);
       setFileName('');
+      setProgress(0);
+      setProgressText('');
     }
   }, [open]);
 
@@ -547,15 +635,32 @@ function ImportDialog({ open, onClose, onImportComplete }) {
   };
 
   /**
-   * Import parsed documents to the knowledge base.
+   * Import parsed documents to the knowledge base using chunked uploads.
+   * This algorithm splits large datasets into smaller batches to avoid
+   * payload size limits and provides progress feedback.
    */
   const handleImport = async () => {
     if (parsedData.length === 0) return;
 
     setImporting(true);
+    setProgress(0);
+    setProgressText('Starting import...');
+
     try {
-      const result = await bulkImportDocuments(parsedData);
+      // Use chunked upload for large files (clever algorithm)
+      // Chunk size of 50 keeps each request small (~50-100KB)
+      const result = await uploadInChunks(
+        parsedData,
+        bulkImportDocuments,
+        (pct, currentChunk, totalChunks) => {
+          setProgress(pct);
+          setProgressText(`Processing chunk ${currentChunk} of ${totalChunks}...`);
+        },
+        50 // 50 documents per chunk
+      );
+
       setImportResult(result);
+      setProgressText('Import complete!');
 
       // If any imports succeeded, notify parent to refresh
       if (result.imported > 0) {
@@ -706,6 +811,22 @@ Part A,Brakes,Desc...,key1;key2`}
           )}
 
           {/* ─────────────────────────────────────────────────────────────────
+              PROGRESS BAR (shown during import)
+              ───────────────────────────────────────────────────────────────── */}
+          {importing && (
+            <div className="space-y-2">
+              <div className="flex justify-between text-sm">
+                <span className="text-muted-foreground">{progressText}</span>
+                <span className="font-medium">{progress}%</span>
+              </div>
+              <Progress value={progress} max={100} />
+              <p className="text-xs text-muted-foreground text-center">
+                Uploading in chunks to handle large files...
+              </p>
+            </div>
+          )}
+
+          {/* ─────────────────────────────────────────────────────────────────
               IMPORT RESULT
               ───────────────────────────────────────────────────────────────── */}
           {importResult && (
@@ -721,20 +842,23 @@ Part A,Brakes,Desc...,key1;key2`}
                 </span>
               </div>
               <div className="text-sm text-muted-foreground">
-                <p>Imported: {importResult.imported}</p>
+                <p>Imported: {importResult.imported.toLocaleString()}</p>
                 {importResult.failed > 0 && (
-                  <p>Failed: {importResult.failed}</p>
+                  <p>Failed: {importResult.failed.toLocaleString()}</p>
                 )}
               </div>
               {importResult.errors?.length > 0 && (
-                <div className="mt-2 text-xs">
-                  <p className="text-destructive">Errors:</p>
-                  <ul className="list-disc list-inside">
-                    {importResult.errors.slice(0, 5).map((err, i) => (
+                <details className="mt-2 text-xs">
+                  <summary className="cursor-pointer text-destructive">View errors ({importResult.errors.length})</summary>
+                  <ul className="list-disc list-inside mt-1 max-h-24 overflow-y-auto">
+                    {importResult.errors.slice(0, 10).map((err, i) => (
                       <li key={i}>{err.title}: {err.error}</li>
                     ))}
+                    {importResult.errors.length > 10 && (
+                      <li>...and {importResult.errors.length - 10} more</li>
+                    )}
                   </ul>
-                </div>
+                </details>
               )}
             </div>
           )}
@@ -744,7 +868,7 @@ Part A,Brakes,Desc...,key1;key2`}
             DIALOG FOOTER
             ───────────────────────────────────────────────────────────────────── */}
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>
+          <Button variant="outline" onClick={onClose} disabled={importing}>
             {importResult ? 'Close' : 'Cancel'}
           </Button>
           {!importResult && (
@@ -760,7 +884,7 @@ Part A,Brakes,Desc...,key1;key2`}
               ) : (
                 <>
                   <Upload className="mr-2 h-4 w-4" />
-                  Import {parsedData.length} Documents
+                  Import {parsedData.length.toLocaleString()} Documents
                 </>
               )}
             </Button>
