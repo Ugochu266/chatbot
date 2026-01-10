@@ -77,11 +77,12 @@ const navItems = [
     href: '/admin/knowledge-base',
     icon: BookOpen,
   },
-  {
-    title: 'Spare Parts',
-    href: '/admin/spare-parts',
-    icon: Package,
-  },
+  // Spare Parts menu hidden - functionality preserved for future restoration
+  // {
+  //   title: 'Spare Parts',
+  //   href: '/admin/spare-parts',
+  //   icon: Package,
+  // },
   {
     title: 'Safety Rules',
     href: '/admin/rules',
