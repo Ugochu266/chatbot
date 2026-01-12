@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Admin Service Module
  *
  * This module provides API functions for the SafeChat admin dashboard.

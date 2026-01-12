@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Rate Limiter Middleware Module
  *
  * This module implements rate limiting to protect the SafeChat API from abuse,

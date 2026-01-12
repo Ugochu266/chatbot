@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Protected Route Component
  *
  * This component provides route protection for admin pages in SafeChat.

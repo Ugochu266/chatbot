@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Admin Dashboard Page
  *
  * This page provides the main overview of SafeChat system metrics and statistics.

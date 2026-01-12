@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Session Management Hook
  *
  * This hook manages user session state in SafeChat. It provides a persistent

@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Conversation Management Hook
  *
  * This hook manages conversation state in SafeChat, handling CRUD operations

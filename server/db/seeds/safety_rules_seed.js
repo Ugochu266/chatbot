@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Safety Rules Seed Module
  *
  * This module populates the database with default safety configuration for SafeChat.

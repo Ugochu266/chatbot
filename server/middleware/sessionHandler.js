@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Session Handler Middleware Module
  *
  * This module implements stateless session management for the SafeChat application.

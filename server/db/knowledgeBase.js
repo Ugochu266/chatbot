@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Knowledge Base Database Module
  *
  * This module handles all database operations for the knowledge base in SafeChat.

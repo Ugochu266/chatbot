@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Safety Pipeline Service
  *
  * This is the main orchestration layer for all safety checks in SafeChat.

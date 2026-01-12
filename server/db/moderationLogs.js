@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Moderation Logs Database Module
  *
  * This module handles logging of content moderation results in SafeChat.

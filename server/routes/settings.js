@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Settings Routes Module
  *
  * This module provides REST API endpoints for managing SafeChat's configuration settings.

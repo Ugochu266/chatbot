@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Error Handler Middleware Module
  *
  * This module provides centralized error handling and logging for the SafeChat

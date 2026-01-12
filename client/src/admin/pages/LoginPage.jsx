@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Admin Login Page
  *
  * This page provides the authentication interface for the SafeChat admin dashboard.

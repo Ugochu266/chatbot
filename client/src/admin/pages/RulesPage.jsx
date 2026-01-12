@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Safety Rules Management Page
  *
  * This page provides comprehensive management of safety rules including regex patterns,

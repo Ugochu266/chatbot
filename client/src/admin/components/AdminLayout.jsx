@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Admin Layout Component
  *
  * This component provides the shell layout for all admin pages in SafeChat.

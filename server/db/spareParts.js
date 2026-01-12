@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Spare Parts Database Module
  *
  * This module handles all database operations for the spare parts catalog in SafeChat.

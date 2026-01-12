@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * SafeChat API Server
  *
  * This is the main entry point for the SafeChat backend application.

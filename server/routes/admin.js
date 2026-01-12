@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Admin Routes Module
  *
  * This module provides REST API endpoints for administrative functions in SafeChat.

@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Message Bubble Component
  *
  * This component renders individual chat messages with appropriate styling

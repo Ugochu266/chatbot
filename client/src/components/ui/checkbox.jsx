@@ -1,3 +1,8 @@
+/**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
 import * as React from "react"
 import * as CheckboxPrimitive from "@radix-ui/react-checkbox"
 import { Check } from "lucide-react"

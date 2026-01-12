@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Escalation Detection Service
  *
  * This service analyzes user messages to detect situations that require

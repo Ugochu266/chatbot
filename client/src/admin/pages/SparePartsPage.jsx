@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Spare Parts Management Page
  *
  * This page allows admins to manage the vehicle spare parts catalog.

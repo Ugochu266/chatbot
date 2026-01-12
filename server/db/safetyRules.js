@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Safety Rules Database Module
  *
  * This module provides CRUD operations for SafeChat's configurable safety system.

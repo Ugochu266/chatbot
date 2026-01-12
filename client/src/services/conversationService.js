@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Conversation Service Module
  *
  * This module provides API functions for managing conversations in SafeChat.

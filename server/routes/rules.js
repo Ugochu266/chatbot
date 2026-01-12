@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Safety Rules Routes Module
  *
  * This module provides REST API endpoints for managing safety rules in SafeChat.

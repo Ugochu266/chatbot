@@ -1,3 +1,8 @@
+/**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
 import * as React from "react"
 import * as SwitchPrimitives from "@radix-ui/react-switch"
 import { cn } from "../../lib/utils"

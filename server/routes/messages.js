@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Messages Routes Module
  *
  * This module handles the core chat functionality of SafeChat - receiving user messages

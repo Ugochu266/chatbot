@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Moderation Logs Page
  *
  * This page displays all content moderation events from the OpenAI Moderation API.

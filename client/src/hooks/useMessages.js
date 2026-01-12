@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Message Sending Hook
  *
  * This hook manages the message sending workflow in SafeChat, supporting

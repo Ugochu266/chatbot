@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Database Connection Module
  *
  * This module establishes and exports the database connection for the SafeChat

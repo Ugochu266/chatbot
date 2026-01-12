@@ -1,3 +1,8 @@
+/**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
 /** @type {import('tailwindcss').Config} */
 module.exports = {
   darkMode: ["class"],

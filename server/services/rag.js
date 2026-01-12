@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * RAG (Retrieval-Augmented Generation) Service
  *
  * This service implements the retrieval component of RAG, which enhances AI responses

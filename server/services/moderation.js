@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Content Moderation Service
  *
  * This service integrates with OpenAI's Moderation API to detect harmful content

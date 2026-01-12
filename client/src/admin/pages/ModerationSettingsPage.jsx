@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Moderation Settings Page
  *
  * This page allows admins to configure OpenAI Moderation API thresholds and actions

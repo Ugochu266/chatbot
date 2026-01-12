@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Chat Container Component
  *
  * This is the main chat interface component that orchestrates the entire

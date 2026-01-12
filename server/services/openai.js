@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * OpenAI Integration Service
  *
  * This service handles all communication with the OpenAI API for generating

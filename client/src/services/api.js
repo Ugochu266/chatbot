@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * API Configuration Module
  *
  * This module provides the core HTTP client configuration for SafeChat.

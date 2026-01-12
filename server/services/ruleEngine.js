@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Rule Engine Service
  *
  * This service provides dynamic, database-driven safety rules for the SafeChat system.

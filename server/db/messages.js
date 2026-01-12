@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Messages Database Module
  *
  * This module handles all database operations for chat messages in the SafeChat

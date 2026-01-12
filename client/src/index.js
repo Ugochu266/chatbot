@@ -1,4 +1,9 @@
 /**
+ * Author: Edoziem Ugochukwu Destiny
+ * Student ID: 23057995
+ */
+
+/**
  * Application Entry Point
  *
  * This is the main entry point for the SafeChat React application.
